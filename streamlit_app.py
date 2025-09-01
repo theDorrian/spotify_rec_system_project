@@ -1,4 +1,4 @@
-# streamlit_app.py — no genres, robust query params
+# streamlit_app.py — no genres, unique keys, dedup grids
 import json, random
 from pathlib import Path
 
@@ -68,11 +68,12 @@ def load_artifacts(art_dir: Path):
 cfg, meta, scaler, mlb, svd, id_map_raw, index = load_artifacts(ART_DIR)
 
 # ----- columns -----
-name_col   = meta.get("track_name_col")  or "track_name"
-artist_col = meta.get("artist_name_col") or "artist_name"
-pop_col    = "popularity" if "popularity" in id_map_raw.columns else None
-img_col    = "image_url"  if "image_url"  in id_map_raw.columns else None
-prev_col   = "preview_url"if "preview_url"in id_map_raw.columns else None
+name_col    = meta.get("track_name_col")  or "track_name"
+artist_col  = meta.get("artist_name_col") or "artist_name"
+trackid_col = meta.get("track_id_col")    or "track_id"
+pop_col     = "popularity" if "popularity" in id_map_raw.columns else None
+img_col     = "image_url"  if "image_url"  in id_map_raw.columns else None
+prev_col    = "preview_url"if "preview_url"in id_map_raw.columns else None
 
 # ensure row_id
 if "row_id" not in id_map_raw.columns:
@@ -91,8 +92,20 @@ def only_top(df: pd.DataFrame) -> pd.DataFrame:
         return df
     return df[df[pop_col] >= POP_CUTOFF]
 
+def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
+    """убираем дубли по track_id, иначе по (name, artist)."""
+    if trackid_col in df.columns:
+        df = df.drop_duplicates(subset=[trackid_col])
+    else:
+        subs = [c for c in [name_col, artist_col] if c in df.columns]
+        if subs:
+            df = df.drop_duplicates(subset=subs)
+    if take is not None:
+        df = df.head(take)
+    return df
+
 # ----- helpers -----
-def track_card(row: pd.Series):
+def track_card(row: pd.Series, key_prefix: str):
     st.markdown('<div class="card">', unsafe_allow_html=True)
     c = st.columns([1,2])
     with c[0]:
@@ -112,17 +125,16 @@ def track_card(row: pd.Series):
         if prev_col and pd.notna(row.get(prev_col, None)):
             st.markdown(f'<a target="_blank" href="{row[prev_col]}">▶️ Preview</a>', unsafe_allow_html=True)
 
-        # robust open button (state + safe query param)
-        if st.button("Open", key=f"open_{row.name}", use_container_width=True):
+        # уникальный ключ для каждой секции
+        if st.button("Open", key=f"{key_prefix}_open_{row.name}", use_container_width=True):
             rid = int(row.name)
             st.session_state["selected_row_id"] = rid
-            # New API (>=1.32): dict-like proxy
+            # попытка обновить query param (новый/старый API)
             try:
-                st.query_params["track"] = str(rid)
+                st.query_params["track"] = str(rid)   # >=1.32
             except Exception:
-                # Older API
                 try:
-                    st.experimental_set_query_params(track=rid)
+                    st.experimental_set_query_params(track=rid)  # старый
                 except Exception:
                     pass
     st.markdown('</div>', unsafe_allow_html=True)
@@ -158,38 +170,39 @@ except Exception:
             selected_from_url = int(params["track"][0])
     except Exception:
         pass
-
 if selected_from_url is not None:
     st.session_state["selected_row_id"] = selected_from_url
 
-# ----- Section A: Top 10 Global -----
+# ----- Section A: Top 10 Global (dedup) -----
 st.subheader("🔥 Top 10 Global")
 if pop_col:
-    top_global = only_top(IDMAP).sort_values(pop_col, ascending=False).head(10)
+    top_global = only_top(IDMAP).sort_values(pop_col, ascending=False)
 else:
     top_global = IDMAP.sample(min(10, len(IDMAP)), random_state=42)
+top_global = dedup(top_global, take=10)
 
 cols = st.columns(5)
-for i, (_, r) in enumerate(top_global.iterrows()):
+for i, (rid, r) in enumerate(top_global.iterrows()):
     with cols[i % 5]:
-        track_card(r)
+        track_card(r, key_prefix=f"top10_{i}")
 
 # ----- Section B: 4–5 random artists with their top tracks -----
 st.markdown("---")
 st.subheader("🎛️ Top by random artists")
 artists = IDMAP[artist_col].dropna().unique().tolist()
 random.shuffle(artists)
-for a in artists[:min(5, len(artists))]:
+for ai, a in enumerate(artists[:min(5, len(artists))]):
     adf = IDMAP[IDMAP[artist_col] == a]
     adf = only_top(adf)
     if adf.empty:
         continue
     st.markdown(f"##### {a} — top tracks")
-    adf = adf.sort_values(pop_col, ascending=False).head(10) if pop_col else adf.head(10)
+    adf = adf.sort_values(pop_col, ascending=False) if pop_col else adf
+    adf = dedup(adf, take=10)
     cols = st.columns(5)
-    for i, (_, r) in enumerate(adf.iterrows()):
+    for i, (rid, r) in enumerate(adf.iterrows()):
         with cols[i % 5]:
-            track_card(r)
+            track_card(r, key_prefix=f"artist_{ai}_{i}")
 
 # ----- Detail view -----
 selected_id = st.session_state.get("selected_row_id")
@@ -197,7 +210,7 @@ if selected_id is not None and selected_id in IDMAP.index:
     st.markdown("---")
     st.header("🎵 Now playing")
     seed = IDMAP.loc[selected_id]
-    track_card(seed)
+    track_card(seed, key_prefix="nowplaying")
 
     st.subheader("✨ Recommendations")
     left, right = st.columns(2)
@@ -208,29 +221,31 @@ if selected_id is not None and selected_id in IDMAP.index:
         same_df = IDMAP[IDMAP[artist_col] == seed.get(artist_col)].copy()
         same_df = same_df.loc[same_df.index != selected_id]
         same_df = only_top(same_df)
-        same_df = same_df.sort_values(pop_col, ascending=False).head(7) if pop_col else same_df.head(7)
+        same_df = same_df.sort_values(pop_col, ascending=False) if pop_col else same_df
+        same_df = dedup(same_df, take=7)
         if same_df.empty:
             st.info("No same-artist candidates.")
         else:
             cols = st.columns(7)
-            for i, (_, r) in enumerate(same_df.iterrows()):
+            for i, (rid, r) in enumerate(same_df.iterrows()):
                 with cols[i % 7]:
-                    track_card(r)
+                    track_card(r, key_prefix=f"same_{selected_id}_{i}")
 
     # 7 similar by Annoy (top)
     with right:
         st.markdown("**Similar by audio (top)**")
-        sim_df = similar_items(selected_id, k=60)
+        sim_df = similar_items(selected_id, k=80)
         if not sim_df.empty:
             sim_df = sim_df.loc[sim_df.index != selected_id]
-            sim_df = only_top(sim_df).head(7)
+            sim_df = only_top(sim_df)
+            sim_df = dedup(sim_df, take=7)
         if sim_df.empty:
             st.info("No similar top candidates.")
         else:
             cols = st.columns(7)
-            for i, (_, r) in enumerate(sim_df.iterrows()):
+            for i, (rid, r) in enumerate(sim_df.iterrows()):
                 with cols[i % 7]:
-                    track_card(r)
+                    track_card(r, key_prefix=f"sim_{selected_id}_{i}")
 
 # ----- Explore snapshot -----
 st.markdown("---")
