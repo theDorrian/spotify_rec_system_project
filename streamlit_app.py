@@ -9,7 +9,6 @@ import plotly.express as px
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
-# ---------- стили ----------
 st.markdown("""
 <style>
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
@@ -28,7 +27,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- артефакты ----------
 ART_DIR = Path("artifacts")
 TOP_QUANTILE = 0.70
 
@@ -79,38 +77,19 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
         df = df.drop_duplicates(subset=subs) if subs else df
     return df.head(take) if take else df
 
-# ---------- состояние ----------
+# ----------------- state -----------------
 if "selected_row_id" not in st.session_state:
     st.session_state["selected_row_id"] = None
 if "q" not in st.session_state:
     st.session_state["q"] = ""
-if "rand_blocks" not in st.session_state:
-    st.session_state["rand_blocks"] = None  # список [(artist, [row_ids])]
 
-def build_random_blocks(k_artists: int = 4, take_tracks: int = 10):
-    artists = IDMAP[artist_col].dropna().unique().tolist()
-    if not artists:
-        return []
-    random.shuffle(artists)
-    chosen = artists[:min(k_artists, len(artists))]
-    blocks = []
-    for a in chosen:
-        adf = only_top(IDMAP[IDMAP[artist_col] == a].copy())
-        if pop_col in adf.columns:
-            adf = adf.sort_values(pop_col, ascending=False)
-        row_ids = adf.index.tolist()[:take_tracks]  # ← до 10 треков
-        blocks.append((a, row_ids))
-    return blocks
-
-# ---------- верхняя панель ----------
+# ----------------- top bar ----------------
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
 c1, c2, c3 = st.columns([0.28, 0.54, 0.18])
 with c1:
     if st.button("🎧 Spotify Recommender", use_container_width=True):
         st.session_state["selected_row_id"] = None
         st.session_state["q"] = ""
-        if st.session_state.get("rand_blocks") is None:
-            st.session_state["rand_blocks"] = build_random_blocks()
         st.rerun()
 with c2:
     q = st.text_input("Search", value=st.session_state["q"],
@@ -122,10 +101,10 @@ with c3:
                 unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- helpers ----------
+# ----------------- helpers ----------------
 def open_track(row_id: int):
     st.session_state["selected_row_id"] = int(row_id)
-    st.session_state["q"] = ""  # скрыть результаты поиска после выбора
+    st.session_state["q"] = ""
     st.rerun()
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
@@ -173,7 +152,7 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ---------- поиск (показываем ТОЛЬКО если НЕ выбран трек) ----------
+# ----------------- search (only when no track selected) -----------------
 search_results = pd.DataFrame()
 if st.session_state["selected_row_id"] is None and st.session_state["q"].strip():
     ql = st.session_state["q"].strip().lower()
@@ -189,14 +168,10 @@ if st.session_state["selected_row_id"] is None and st.session_state["q"].strip()
         render_grid(search_results, key_prefix="search", take=20, cols=5)
     st.markdown("---")
 
-# ---------- главная или детали ----------
+# ----------------- main or details -----------------
 selected_id = st.session_state["selected_row_id"]
 
 if selected_id is None and search_results.empty:
-    # фиксируем блоки, если ещё не построены
-    if st.session_state.get("rand_blocks") is None:
-        st.session_state["rand_blocks"] = build_random_blocks()
-
     if pop_col:
         st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {float(IDMAP[pop_col].quantile(TOP_QUANTILE)):.1f}")
 
@@ -205,12 +180,13 @@ if selected_id is None and search_results.empty:
     render_grid(top_global, key_prefix="global", take=10, cols=5)
 
     st.markdown("---")
-    st.subheader("🧩 Top by random artists")
-    for ai, (artist_name, row_ids) in enumerate(st.session_state["rand_blocks"]):
-        st.markdown(f"**{artist_name} — top tracks**")
-        block_df = IDMAP.loc[[rid for rid in row_ids if rid in IDMAP.index]].copy()
-        # гарантируем до 10 треков в секции
-        render_grid(block_df, key_prefix=f"artist_{ai}", take=10, cols=5)
+    # <<< ВОТ ТА СЕКЦИЯ, о которой ты просил
+    st.subheader("⭐ Top 10 (pop ≥ cutoff)")
+    if pop_col:
+        top_cut = IDMAP[IDMAP[pop_col] >= POP_CUTOFF].sort_values(pop_col, ascending=False)
+    else:
+        top_cut = IDMAP
+    render_grid(top_cut, key_prefix="topcut", take=10, cols=5)
 
 elif selected_id is not None:
     seed = IDMAP.loc[selected_id]
