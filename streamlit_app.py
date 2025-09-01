@@ -1,3 +1,4 @@
+# streamlit_app.py
 import json, random
 from pathlib import Path
 import numpy as np
@@ -9,6 +10,7 @@ import plotly.express as px
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
+# ---------- стили ----------
 st.markdown("""
 <style>
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
@@ -27,6 +29,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ---------- артефакты ----------
 ART_DIR = Path("artifacts")
 TOP_QUANTILE = 0.70
 
@@ -77,13 +80,15 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
         df = df.drop_duplicates(subset=subs) if subs else df
     return df.head(take) if take else df
 
-# ----------------- state -----------------
+# ---------- состояние ----------
 if "selected_row_id" not in st.session_state:
     st.session_state["selected_row_id"] = None
 if "q" not in st.session_state:
     st.session_state["q"] = ""
+if "rand_cut_ids" not in st.session_state:
+    st.session_state["rand_cut_ids"] = None  # сохранённый сэмпл для Random 10
 
-# ----------------- top bar ----------------
+# ---------- верхняя панель ----------
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
 c1, c2, c3 = st.columns([0.28, 0.54, 0.18])
 with c1:
@@ -101,10 +106,10 @@ with c3:
                 unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ----------------- helpers ----------------
+# ---------- helpers ----------
 def open_track(row_id: int):
     st.session_state["selected_row_id"] = int(row_id)
-    st.session_state["q"] = ""
+    st.session_state["q"] = ""  # скрыть результаты поиска после клика
     st.rerun()
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
@@ -152,9 +157,23 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ----------------- search (only when no track selected) -----------------
+def top_global_ids(n: int = 10) -> list[int]:
+    if pop_col:
+        return only_top(IDMAP).sort_values(pop_col, ascending=False).head(n).index.tolist()
+    return IDMAP.index.tolist()[:n]
+
+def sample_random_cut_ids(k: int = 10) -> list[int]:
+    tg = set(top_global_ids(10))
+    pool_df = only_top(IDMAP)
+    pool_ids = [rid for rid in pool_df.index.tolist() if rid not in tg]
+    if not pool_ids:
+        return []
+    k = min(k, len(pool_ids))
+    return random.sample(pool_ids, k)
+
+# ---------- поиск (работает всегда) ----------
 search_results = pd.DataFrame()
-if st.session_state["selected_row_id"] is None and st.session_state["q"].strip():
+if st.session_state["q"].strip():
     ql = st.session_state["q"].strip().lower()
     mask = IDMAP[name_col].astype(str).str.lower().str.contains(ql, na=False) | \
            IDMAP[artist_col].astype(str).str.lower().str.contains(ql, na=False)
@@ -168,33 +187,22 @@ if st.session_state["selected_row_id"] is None and st.session_state["q"].strip()
         render_grid(search_results, key_prefix="search", take=20, cols=5)
     st.markdown("---")
 
-# ----------------- main or details -----------------
+# ---------- основное / детали ----------
 selected_id = st.session_state["selected_row_id"]
 
-if selected_id is None and search_results.empty:
-    if pop_col:
-        st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {float(IDMAP[pop_col].quantile(TOP_QUANTILE)):.1f}")
+if pop_col:
+    st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {float(IDMAP[pop_col].quantile(TOP_QUANTILE)):.1f}")
 
+if selected_id is None:
     st.subheader("🔥 Top 10 Global")
     top_global = only_top(IDMAP).sort_values(pop_col, ascending=False) if pop_col else IDMAP
     render_grid(top_global, key_prefix="global", take=10, cols=5)
-
-    st.markdown("---")
-    # <<< ВОТ ТА СЕКЦИЯ, о которой ты просил
-    st.subheader("⭐ Top 10 (pop ≥ cutoff)")
-    if pop_col:
-        top_cut = IDMAP[IDMAP[pop_col] >= POP_CUTOFF].sort_values(pop_col, ascending=False)
-    else:
-        top_cut = IDMAP
-    render_grid(top_cut, key_prefix="topcut", take=10, cols=5)
-
-elif selected_id is not None:
-    seed = IDMAP.loc[selected_id]
+else:
     st.subheader("Now playing")
-    hero_card(seed)
+    hero_card(IDMAP.loc[selected_id])
 
     st.subheader("Recommended for you")
-    same_df = IDMAP[IDMAP[artist_col] == seed.get(artist_col)].copy()
+    same_df = IDMAP[IDMAP[artist_col] == IDMAP.loc[selected_id, artist_col]].copy()
     same_df = same_df.loc[same_df.index != selected_id]
     same_df = only_top(same_df)
     same_df = same_df.sort_values(pop_col, ascending=False) if pop_col else same_df
@@ -213,6 +221,21 @@ elif selected_id is not None:
         st.markdown('<div class="section-title">Similar by audio (top)</div>', unsafe_allow_html=True)
         if sim_df.empty: st.info("No similar top candidates.")
         else: render_grid(sim_df, key_prefix=f"sim_{selected_id}", take=10, cols=5)
+
+st.markdown("---")
+left, right = st.columns([0.9, 0.1])
+with left:
+    st.subheader("⭐ Random 10 (pop ≥ cutoff, not in Top 10 Global)")
+with right:
+    if st.button("🎲 Shuffle", use_container_width=True):
+        st.session_state["rand_cut_ids"] = sample_random_cut_ids(10)
+        st.rerun()
+
+if not st.session_state["rand_cut_ids"]:
+    st.session_state["rand_cut_ids"] = sample_random_cut_ids(10)
+rand_ids = st.session_state["rand_cut_ids"]
+rand_df = IDMAP.loc[rand_ids].copy() if rand_ids else pd.DataFrame()
+render_grid(rand_df, key_prefix="randcut", take=10, cols=5)
 
 st.markdown("---")
 with st.expander("📈 Explore snapshot"):
