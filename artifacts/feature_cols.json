@@ -1,0 +1,15 @@
+{
+  "audio_cols": [
+    "danceability",
+    "energy",
+    "valence",
+    "acousticness",
+    "instrumentalness",
+    "liveness",
+    "speechiness",
+    "tempo",
+    "loudness",
+    "duration_ms"
+  ],
+  "genres_col": "genre"
+}

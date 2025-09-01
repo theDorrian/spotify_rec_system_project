@@ -1,0 +1,9 @@
+{
+  "track_id_col": "track_id",
+  "track_name_col": "track_name",
+  "artist_name_col": "artist_name",
+  "playlist_id_col": null,
+  "n_rows": 232725,
+  "dim": 37,
+  "trees": 100
+}
