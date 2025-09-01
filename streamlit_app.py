@@ -9,6 +9,7 @@ import plotly.express as px
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
+# ---------- стили ----------
 st.markdown("""
 <style>
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
@@ -29,6 +30,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ---------- артефакты ----------
 ART_DIR = Path("artifacts")
 TOP_QUANTILE = 0.70
 
@@ -79,36 +81,43 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
         df = df.drop_duplicates(subset=subs) if subs else df
     return df.head(take) if take else df
 
-def set_selected_from_qs():
-    # единственный источник правды — ?track
+# ---------- query params helpers (новый API) ----------
+def get_track_from_qs() -> int | None:
+    val = st.query_params.get("track")
+    if isinstance(val, list):
+        val = val[0] if val else None
     try:
-        params = st.experimental_get_query_params()
-        if "track" in params and params["track"]:
-            st.session_state["selected_row_id"] = int(params["track"][0])
-        elif "selected_row_id" not in st.session_state:
-            st.session_state["selected_row_id"] = None
+        return int(val) if val is not None else None
     except Exception:
-        pass
+        return None
 
-# ── топбар
+def set_track_in_qs(row_id: int | None):
+    if row_id is None:
+        qp = st.query_params
+        if "track" in qp: del qp["track"]
+    else:
+        st.query_params["track"] = str(int(row_id))
+
+# ---------- топбар ----------
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
 col_brand, col_search, col_avatar = st.columns([0.24, 0.56, 0.20])
 with col_brand:
-    if st.button("🎧 Spotify Recommender", key="brand_home", help="Go home", use_container_width=True):
+    if st.button("🎧 Spotify Recommender", key="brand_home", use_container_width=True):
         st.session_state["selected_row_id"] = None
-        st.experimental_set_query_params()  # сбросить track
-        st.experimental_rerun()
+        set_track_in_qs(None)
+        st.rerun()
 with col_search:
     q = st.text_input("Search", key="q", placeholder="Search tracks or artists…", label_visibility="collapsed")
 with col_avatar:
     st.markdown('<div style="text-align:right;"><span class="avatar"><small>AK</small></span></div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
+# ---------- клики / рендер ----------
 def open_track(row_id: int):
     rid = int(row_id)
     st.session_state["selected_row_id"] = rid
-    st.experimental_set_query_params(track=rid)
-    st.experimental_rerun()
+    set_track_in_qs(rid)
+    st.rerun()
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
     img = row.get(img_col) or "https://placehold.co/300x300?text=Track"
@@ -155,12 +164,16 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
+# ---------- состояние из query params ----------
 if "selected_row_id" not in st.session_state:
     st.session_state["selected_row_id"] = None
-set_selected_from_qs()
+track_qs = get_track_from_qs()
+if track_qs is not None:
+    st.session_state["selected_row_id"] = track_qs
+
 selected_id = st.session_state.get("selected_row_id")
 
-# поиск
+# ---------- поиск ----------
 search_results = pd.DataFrame()
 if q and isinstance(q, str) and len(q.strip()) >= 2:
     ql = q.strip().lower()
@@ -176,7 +189,7 @@ if q and isinstance(q, str) and len(q.strip()) >= 2:
         render_grid(search_results, key_prefix="search", take=20, cols=5)
     st.markdown("---")
 
-# главная/детали
+# ---------- главная / детали ----------
 if selected_id is None and search_results.empty:
     if pop_col:
         st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {float(IDMAP[pop_col].quantile(TOP_QUANTILE)):.1f}")
@@ -190,7 +203,7 @@ if selected_id is None and search_results.empty:
     random.shuffle(artists)
     for ai, a in enumerate(artists[:min(4, len(artists))]):
         adf = only_top(IDMAP[IDMAP[artist_col] == a])
-        if adf.empty: 
+        if adf.empty:
             continue
         st.markdown(f"**{a} — top tracks**")
         adf = adf.sort_values(pop_col, ascending=False) if pop_col else adf
