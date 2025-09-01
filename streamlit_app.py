@@ -9,16 +9,22 @@ import plotly.express as px
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
-# ── Fixed Home button (always visible)
-st.html("""
-<div style="position:fixed;top:15px;left:15px;z-index:1000;">
-  <button onclick="window.location.href='/'"
-    style="background:#1DB954;color:#fff;font-weight:600;border-radius:20px;
-           padding:8px 20px;border:none;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)">
-    🏠 Home
-  </button>
+# ── Fixed Home button (works on Streamlit Cloud)
+st.markdown("""
+<style>
+.fixed-home{position:fixed;top:15px;left:15px;z-index:1000}
+.fixed-home button{
+  background:#1DB954;color:#fff;font-weight:600;border-radius:20px;
+  padding:8px 20px;border:none;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)
+}
+.fixed-home button:hover{background:#1ed760}
+</style>
+<div class="fixed-home">
+  <form action="/" method="get">
+    <button type="submit">🏠 Home</button>
+  </form>
 </div>
-""")
+""", unsafe_allow_html=True)
 
 ART_DIR = Path("artifacts")
 TOP_QUANTILE = 0.70
