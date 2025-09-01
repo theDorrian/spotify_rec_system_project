@@ -1,4 +1,4 @@
-import json, random
+import json, random, textwrap
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -101,43 +101,41 @@ def hero_card(row: pd.Series):
         st.markdown(f'<img src="{img}" class="hero-cover">', unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="hero">', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div>
-              <div class="title">{row.get(name_col, "Unknown")}</div>
-              <div class="artist">{row.get(artist_col, "")}</div>
-              <div style="margin-top:10px">
-                {f'<span class="pill">pop {int(row[pop_col])}</span>' if pop_col and pd.notna(row.get(pop_col,None)) else ''}
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown(textwrap.dedent(f"""
+        <div>
+          <div class="title">{row.get(name_col, "Unknown")}</div>
+          <div class="artist">{row.get(artist_col, "")}</div>
+          <div style="margin-top:10px">
+            {f'<span class="pill">pop {int(row[pop_col])}</span>' if pop_col and pd.notna(row.get(pop_col,None)) else ''}
+          </div>
+        </div>
+        """), unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         if prev_col and pd.notna(row.get(prev_col, None)):
             st.audio(row[prev_col])
 
 def render_grid(df: pd.DataFrame, take: int = 10):
     df = dedup(df, take=take)
-    html = ['<div class="grid">']
+    parts = ['<div class="grid">']
     for rid, r in df.iterrows():
-        img = r.get(img_col) or "https://placehold.co/300x300?text=Track"
-        name = str(r.get(name_col,"Unknown"))
-        artist = str(r.get(artist_col,""))
-        pill = f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col,None)) else ''
-        html.append(f'''
-          <div class="card-box">
-            <a href="?track={int(rid)}" style="text-decoration:none;color:inherit">
-              <img src="{img}" class="card-cover"/>
-              <div class="name">{name}</div>
-              <div class="artist-s">{artist}</div>
-            </a>
-            {pill}
-            <a class="btn" href="?track={int(rid)}">▶️ Open</a>
-          </div>
-        ''')
-    html.append('</div>')
-    st.markdown("\n".join(html), unsafe_allow_html=True)
+        img   = r.get(img_col) or "https://placehold.co/300x300?text=Track"
+        name  = str(r.get(name_col, "Unknown"))
+        artist= str(r.get(artist_col, ""))
+        pill  = f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col, None)) else ''
+        parts.append(f"""
+<div class="card-box">
+  <a href="?track={int(rid)}" style="text-decoration:none;color:inherit">
+    <img src="{img}" class="card-cover"/>
+    <div class="name">{name}</div>
+    <div class="artist-s">{artist}</div>
+  </a>
+  {pill}
+  <a class="btn" href="?track={int(rid)}">▶️ Open</a>
+</div>
+""")
+    parts.append('</div>')
+    html = textwrap.dedent("\n".join(parts))
+    st.markdown(html, unsafe_allow_html=True)
 
 def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     try:
@@ -154,6 +152,7 @@ with left:
     st.markdown('<a href="/" class="home-link">🏠 Home</a>', unsafe_allow_html=True)
 with right:
     st.title("Spotify Recommender")
+
 if "selected_row_id" not in st.session_state:
     st.session_state["selected_row_id"] = None
 
