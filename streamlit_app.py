@@ -9,6 +9,39 @@ import plotly.express as px
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
+# --- CSS для закреплённой кнопки ---
+st.markdown("""
+<style>
+.fixed-home {
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 1000;
+}
+.fixed-home button {
+    background-color: #1DB954;
+    color: white;
+    font-weight: 600;
+    border-radius: 20px;
+    padding: 8px 20px;
+    border: none;
+    cursor: pointer;
+}
+.fixed-home button:hover {
+    background-color: #1ed760;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# --- JS + HTML чтобы дергать Streamlit event ---
+home_html = """
+<div class="fixed-home">
+    <button onclick="fetch('?home=1').then(() => window.location.reload())">🏠 Home</button>
+</div>
+"""
+st.markdown(home_html, unsafe_allow_html=True)
+
+# --- Артефакты ---
 ART_DIR = Path("artifacts")
 TOP_QUANTILE = 0.70
 
@@ -74,6 +107,13 @@ def set_selected_from_qs():
                 st.session_state["selected_row_id"] = int(params["track"][0])
         except Exception:
             pass
+    # reset через ?home=1
+    try:
+        if "home" in st.query_params:
+            st.session_state["selected_row_id"] = None
+            st.query_params.clear()
+    except Exception:
+        pass
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
     img = row.get(img_col) or "https://placehold.co/300x300?text=Track"
@@ -124,19 +164,7 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-left, right = st.columns([0.12, 0.88])
-with left:
-    if st.button("🏠 Home"):
-        st.session_state["selected_row_id"] = None
-        try:
-            qp = st.query_params
-            if "track" in qp: del qp["track"]
-        except Exception:
-            try: st.experimental_set_query_params()
-            except Exception: pass
-        st.rerun()
-with right:
-    st.title("Spotify Recommender")
+st.title("Spotify Recommender")
 
 if "selected_row_id" not in st.session_state:
     st.session_state["selected_row_id"] = None
