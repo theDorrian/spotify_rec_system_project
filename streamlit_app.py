@@ -14,8 +14,6 @@ st.markdown("""
 <style>
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
         background:rgba(9,12,18,.8); backdrop-filter: blur(6px); border-bottom:1px solid #1d2636;}
-.brand-btn>button{background:transparent;border:none;color:#fff;font-weight:800;font-size:1.2rem;cursor:pointer;}
-.brand-btn>button:hover{opacity:.85}
 .searchbox input{border-radius:14px !important; height:38px !important; padding-left:14px !important;}
 .avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#2b3446,#0f1726);
         border:1px solid #2b3446; display:inline-flex;align-items:center;justify-content:center;font-weight:700}
@@ -36,7 +34,7 @@ TOP_QUANTILE = 0.70
 
 @st.cache_resource(show_spinner=False)
 def load_artifacts(art_dir: Path):
-    with open(art_dir / "feature_cols.json") as f: cfg = json.load(f)
+    with open(art_dir / "feature_cols.json") as f: _ = json.load(f)
     with open(art_dir / "meta.json") as f: meta = json.load(f)
     try: joblib.load(art_dir / "scaler.joblib")
     except Exception: pass
@@ -81,42 +79,53 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
         df = df.drop_duplicates(subset=subs) if subs else df
     return df.head(take) if take else df
 
-# ---------- query params helpers (новый API) ----------
-def get_track_from_qs() -> int | None:
-    val = st.query_params.get("track")
-    if isinstance(val, list):
-        val = val[0] if val else None
-    try:
-        return int(val) if val is not None else None
-    except Exception:
-        return None
+# ---------- состояние ----------
+if "selected_row_id" not in st.session_state:
+    st.session_state["selected_row_id"] = None
+if "q" not in st.session_state:
+    st.session_state["q"] = ""
+if "rand_blocks" not in st.session_state:
+    st.session_state["rand_blocks"] = None  # список [(artist, [row_ids])]
 
-def set_track_in_qs(row_id: int | None):
-    if row_id is None:
-        qp = st.query_params
-        if "track" in qp: del qp["track"]
-    else:
-        st.query_params["track"] = str(int(row_id))
+def build_random_blocks(k_artists: int = 4, take_tracks: int = 10):
+    artists = IDMAP[artist_col].dropna().unique().tolist()
+    if not artists:
+        return []
+    random.shuffle(artists)
+    chosen = artists[:min(k_artists, len(artists))]
+    blocks = []
+    for a in chosen:
+        adf = only_top(IDMAP[IDMAP[artist_col] == a].copy())
+        if pop_col in adf.columns:
+            adf = adf.sort_values(pop_col, ascending=False)
+        # сохраняем именно row_id, чтобы при ререндере не «съезжало»
+        blocks.append((a, adf.index.tolist()[:take_tracks]))
+    return blocks
 
-# ---------- топбар ----------
+# ---------- верхняя панель ----------
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
-col_brand, col_search, col_avatar = st.columns([0.24, 0.56, 0.20])
-with col_brand:
-    if st.button("🎧 Spotify Recommender", key="brand_home", use_container_width=True):
+c1, c2, c3 = st.columns([0.28, 0.54, 0.18])
+with c1:
+    if st.button("🎧 Spotify Recommender", use_container_width=True):
         st.session_state["selected_row_id"] = None
-        set_track_in_qs(None)
+        st.session_state["q"] = ""
+        if st.session_state.get("rand_blocks") is None:
+            st.session_state["rand_blocks"] = build_random_blocks()
         st.rerun()
-with col_search:
-    q = st.text_input("Search", key="q", placeholder="Search tracks or artists…", label_visibility="collapsed")
-with col_avatar:
-    st.markdown('<div style="text-align:right;"><span class="avatar"><small>AK</small></span></div>', unsafe_allow_html=True)
+with c2:
+    q = st.text_input("Search", value=st.session_state["q"],
+                      placeholder="Search tracks or artists…",
+                      label_visibility="collapsed", key="searchbox")
+    st.session_state["q"] = q
+with c3:
+    st.markdown('<div style="text-align:right;"><span class="avatar"><small>AK</small></span></div>',
+                unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- клики / рендер ----------
+# ---------- helpers ----------
 def open_track(row_id: int):
-    rid = int(row_id)
-    st.session_state["selected_row_id"] = rid
-    set_track_in_qs(rid)
+    st.session_state["selected_row_id"] = int(row_id)
+    st.session_state["q"] = ""  # скрыть поиск после выбора
     st.rerun()
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
@@ -164,50 +173,42 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ---------- состояние из query params ----------
-if "selected_row_id" not in st.session_state:
-    st.session_state["selected_row_id"] = None
-track_qs = get_track_from_qs()
-if track_qs is not None:
-    st.session_state["selected_row_id"] = track_qs
-
-selected_id = st.session_state.get("selected_row_id")
-
-# ---------- поиск ----------
+# ---------- поиск (показываем ТОЛЬКО если НЕ выбран трек) ----------
 search_results = pd.DataFrame()
-if q and isinstance(q, str) and len(q.strip()) >= 2:
-    ql = q.strip().lower()
+if st.session_state["selected_row_id"] is None and st.session_state["q"].strip():
+    ql = st.session_state["q"].strip().lower()
     mask = IDMAP[name_col].astype(str).str.lower().str.contains(ql, na=False) | \
            IDMAP[artist_col].astype(str).str.lower().str.contains(ql, na=False)
     search_results = only_top(IDMAP[mask].copy())
     if pop_col in search_results.columns:
         search_results = search_results.sort_values(pop_col, ascending=False)
-    st.subheader(f"🔎 Search results for: **{q}**")
+    st.subheader(f"🔎 Search results for: **{st.session_state['q']}**")
     if search_results.empty:
         st.info("No matches.")
     else:
         render_grid(search_results, key_prefix="search", take=20, cols=5)
     st.markdown("---")
 
-# ---------- главная / детали ----------
+# ---------- главная или детали ----------
+selected_id = st.session_state["selected_row_id"]
+
 if selected_id is None and search_results.empty:
+    if st.session_state.get("rand_blocks") is None:
+        st.session_state["rand_blocks"] = build_random_blocks()
+
     if pop_col:
         st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {float(IDMAP[pop_col].quantile(TOP_QUANTILE)):.1f}")
+
     st.subheader("🔥 Top 10 Global")
     top_global = only_top(IDMAP).sort_values(pop_col, ascending=False) if pop_col else IDMAP
     render_grid(top_global, key_prefix="global", take=10, cols=5)
 
     st.markdown("---")
-    st.subheader("🎛️ Top by random artists")
-    artists = IDMAP[artist_col].dropna().unique().tolist()
-    random.shuffle(artists)
-    for ai, a in enumerate(artists[:min(4, len(artists))]):
-        adf = only_top(IDMAP[IDMAP[artist_col] == a])
-        if adf.empty:
-            continue
-        st.markdown(f"**{a} — top tracks**")
-        adf = adf.sort_values(pop_col, ascending=False) if pop_col else adf
-        render_grid(adf, key_prefix=f"artist_{ai}", take=10, cols=5)
+    st.subheader("🧩 Top by random artists")
+    for ai, (artist_name, row_ids) in enumerate(st.session_state["rand_blocks"]):
+        st.markdown(f"**{artist_name} — top tracks**")
+        block_df = IDMAP.loc[[rid for rid in row_ids if rid in IDMAP.index]].copy()
+        render_grid(block_df, key_prefix=f"artist_{ai}", take=len(block_df), cols=5)
 
 elif selected_id is not None:
     seed = IDMAP.loc[selected_id]
