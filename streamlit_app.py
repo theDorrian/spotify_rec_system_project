@@ -1,4 +1,4 @@
-# streamlit_app.py — clean detail view + Home button, no deprecation warnings
+# streamlit_app.py — one-click select, Home button, no warnings
 import json, random
 from pathlib import Path
 
@@ -25,9 +25,6 @@ st.markdown("""
   .card:hover{transform:translateY(-3px);border-color:#2b3647}
   .name{font-weight:600;margin-top:8px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .artist-s{opacity:.85;font-size:.9rem;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
-  .row{display:flex;align-items:center;gap:8px;margin-top:6px}
-  .open-btn{all:unset;cursor:pointer;padding:6px 10px;border-radius:10px;border:1px solid #2a3242}
-  .open-btn:hover{background:#1a2232}
 </style>
 """, unsafe_allow_html=True)
 
@@ -42,8 +39,9 @@ def load_artifacts(art_dir: Path):
     with open(art_dir / "meta.json") as f:
         meta = json.load(f)
 
-    # предобученные артефакты
-    joblib.load(art_dir / "scaler.joblib")  # для совместимости; в UI не используем
+    # предобученные артефакты (в UI не используем, но держим для совместимости)
+    try: joblib.load(art_dir / "scaler.joblib")
+    except Exception: pass
     try: joblib.load(art_dir / "svd_64.joblib")
     except Exception: pass
 
@@ -92,9 +90,9 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
 
 # ---------- Helpers ----------
 def set_selected(rid: int | None):
+    """Set or clear selected track; keep URL in sync if возможно."""
     if rid is None:
         st.session_state.pop("selected_row_id", None)
-        # очистка URL параметров
         try:
             qp = st.query_params
             if "track" in qp: del qp["track"]
@@ -104,19 +102,18 @@ def set_selected(rid: int | None):
     else:
         st.session_state["selected_row_id"] = int(rid)
         try:
-            st.query_params["track"] = str(int(rid))      # новый API
+            st.query_params["track"] = str(int(rid))      # новый API (>=1.32)
         except Exception:
-            try: st.experimental_set_query_params(track=int(rid))  # старый
+            try: st.experimental_set_query_params(track=int(rid))  # старый API
             except Exception: pass
 
 def hero_card(row: pd.Series):
     c1, c2 = st.columns([1, 2], gap="large")
     with c1:
-        # без use_column_width — используем новый параметр
-        if img_col and pd.notna(row.get(img_col, None)):
-            st.image(row[img_col], use_container_width=False)
-        else:
-            st.image("https://placehold.co/600x600?text=Album", use_container_width=False)
+        st.image(
+            row.get(img_col, "https://placehold.co/600x600?text=Album"),
+            use_container_width=False
+        )
     with c2:
         st.markdown('<div class="hero">', unsafe_allow_html=True)
         st.markdown(
@@ -136,20 +133,19 @@ def hero_card(row: pd.Series):
             st.audio(row[prev_col])
 
 def rec_grid(df: pd.DataFrame, key_prefix: str):
+    """Рендер компактной сетки рекомендаций (7 карточек) с одним кликом."""
     df = dedup(df, take=7)
     st.markdown('<div class="rec-grid">', unsafe_allow_html=True)
     for rid, r in df.iterrows():
         with st.container():
             st.markdown('<div class="card">', unsafe_allow_html=True)
-            if img_col and pd.notna(r.get(img_col, None)):
-                st.image(r[img_col], use_container_width=True)
-            else:
-                st.image("https://placehold.co/300x300?text=Track", use_container_width=True)
+            st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
             st.markdown(f'<div class="name">{r.get(name_col,"Unknown")}</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="artist-s">{r.get(artist_col,"")}</div>', unsafe_allow_html=True)
-            badge = f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col, None)) else ''
-            st.markdown(badge, unsafe_allow_html=True)
-            if st.button("Open", key=f"{key_prefix}_open_{rid}"):
+            if pop_col and pd.notna(r.get(pop_col, None)):
+                st.markdown(f'<span class="pill">pop {int(r[pop_col])}</span>', unsafe_allow_html=True)
+            # один клик — без HTML-кнопок
+            if st.button("▶️ Open", key=f"{key_prefix}_open_{rid}", use_container_width=True):
                 set_selected(int(rid))
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -164,18 +160,17 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ---------- Header with Home button ----------
-col_home, col_title = st.columns([0.08, 0.92])
+# ---------- Header with Home ----------
+col_home, col_title = st.columns([0.1, 0.9])
 with col_home:
     if st.button("🏠 Home", use_container_width=True):
         set_selected(None)
 with col_title:
     st.title("Spotify Recommender")
-
 if pop_col:
     st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {POP_CUTOFF:.1f}")
 
-# restore selection from URL
+# restore selection from URL (new/old APIs)
 sel_from_url = None
 try:
     val = st.query_params.get("track")
@@ -198,13 +193,13 @@ if selected_id is None:
     st.subheader("🔥 Top 10 Global")
     top_global = only_top(IDMAP).sort_values(pop_col, ascending=False) if pop_col else IDMAP
     top_global = dedup(top_global, take=10)
-    c = st.columns(5)
+    cols = st.columns(5)
     for i, (rid, r) in enumerate(top_global.iterrows()):
-        with c[i % 5]:
+        with cols[i % 5]:
             st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
             st.write(f"**{r.get(name_col,'Unknown')}**")
             st.caption(r.get(artist_col, ""))
-            if st.button("Open", key=f"landing_open_{rid}", use_container_width=True):
+            if st.button("▶️ Open", key=f"landing_open_{rid}", use_container_width=True):
                 set_selected(int(rid))
 
     st.markdown("---")
@@ -217,13 +212,13 @@ if selected_id is None:
             continue
         st.markdown(f"**{a} — top tracks**")
         adf = dedup(adf.sort_values(pop_col, ascending=False) if pop_col else adf, take=10)
-        c = st.columns(5)
+        cols = st.columns(5)
         for i, (rid, r) in enumerate(adf.iterrows()):
-            with c[i % 5]:
+            with cols[i % 5]:
                 st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
                 st.write(f"**{r.get(name_col,'Unknown')}**")
                 st.caption(r.get(artist_col, ""))
-                if st.button("Open", key=f"artist_{ai}_open_{rid}", use_container_width=True):
+                if st.button("▶️ Open", key=f"artist_{ai}_open_{rid}", use_container_width=True):
                     set_selected(int(rid))
 
 else:
