@@ -15,12 +15,16 @@ st.markdown("""
   .hero{display:flex;gap:22px;align-items:center;padding:16px;border:1px solid #1f2633;border-radius:16px;background:#101620}
   .title{font-weight:700;font-size:1.35rem;margin:2px 0}
   .artist{opacity:.9}
-  .hero-cover{width:240px !important;height:240px !important;max-width:240px !important;max-height:240px !important;border-radius:14px;object-fit:cover;display:block}
+  .hero-cover{width:240px;height:240px;max-width:240px;max-height:240px;border-radius:14px;object-fit:cover;display:block}
   .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,210px);justify-content:start;align-content:start}
   .card-box{width:210px;border-radius:14px;background:#11161f;border:1px solid #1f2633;padding:10px}
   .card-cover{width:190px;height:190px;border-radius:12px;object-fit:cover;display:block;margin:0 auto}
   .name{font-weight:600;margin-top:8px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .artist-s{opacity:.85;font-size:.9rem;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .btn{display:inline-block;margin-top:8px;padding:6px 12px;border:1px solid #2a3242;border-radius:10px;text-decoration:none;color:#e6e6e6;background:#0d1220}
+  .btn:hover{border-color:#2b3647;background:#0f1526}
+  .home-link{display:inline-block;padding:6px 12px;border:1px solid #2a3242;border-radius:10px;text-decoration:none;color:#e6e6e6;background:#0d1220}
+  .home-link:hover{border-color:#2b3647;background:#0f1526}
 </style>
 """, unsafe_allow_html=True)
 
@@ -77,31 +81,23 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
         df = df.drop_duplicates(subset=subs) if subs else df
     return df.head(take) if take else df
 
-def set_selected(rid: int | None):
-    if rid is None:
-        st.session_state.pop("selected_row_id", None)
-        try:
-            qp = st.query_params
-            if "track" in qp: del qp["track"]
-        except Exception:
-            try: st.experimental_set_query_params()
-            except Exception: pass
-    else:
-        st.session_state["selected_row_id"] = int(rid)
-        try:
-            st.query_params["track"] = str(int(rid))
-        except Exception:
-            try: st.experimental_set_query_params(track=int(rid))
-            except Exception: pass
+def set_selected_from_qs():
     try:
-        st.rerun()
+        val = st.query_params.get("track")
+        if isinstance(val, (list, tuple)): val = val[0] if val else None
+        if val is not None: st.session_state["selected_row_id"] = int(val)
     except Exception:
-        st.experimental_rerun()
+        try:
+            params = st.experimental_get_query_params()
+            if "track" in params and params["track"]:
+                st.session_state["selected_row_id"] = int(params["track"][0])
+        except Exception:
+            pass
 
 def hero_card(row: pd.Series):
     c1, c2 = st.columns([1, 2], gap="large")
     with c1:
-        img = row.get(img_col, None) or "https://placehold.co/600x600?text=Album"
+        img = row.get(img_col) or "https://placehold.co/600x600?text=Album"
         st.markdown(f'<img src="{img}" class="hero-cover">', unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="hero">', unsafe_allow_html=True)
@@ -121,27 +117,27 @@ def hero_card(row: pd.Series):
         if prev_col and pd.notna(row.get(prev_col, None)):
             st.audio(row[prev_col])
 
-def render_grid(df: pd.DataFrame, key_prefix: str, take: int = 10):
+def render_grid(df: pd.DataFrame, take: int = 10):
     df = dedup(df, take=take)
-    st.markdown('<div class="grid">', unsafe_allow_html=True)
+    html = ['<div class="grid">']
     for rid, r in df.iterrows():
-        img = r.get(img_col, None) or "https://placehold.co/300x300?text=Track"
-        with st.container():
-            st.markdown('<div class="card-box">', unsafe_allow_html=True)
-            st.markdown(
-                f'''
-                <img src="{img}" class="card-cover"/>
-                <div class="name">{r.get(name_col,"Unknown")}</div>
-                <div class="artist-s">{r.get(artist_col,"")}</div>
-                {f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col,None)) else ''}
-                ''',
-                unsafe_allow_html=True
-            )
-            st.button("▶️ Open", key=f"{key_prefix}_open_{rid}",
-                      on_click=set_selected, args=(int(rid),))
-            st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
+        img = r.get(img_col) or "https://placehold.co/300x300?text=Track"
+        name = str(r.get(name_col,"Unknown"))
+        artist = str(r.get(artist_col,""))
+        pill = f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col,None)) else ''
+        html.append(f'''
+          <div class="card-box">
+            <a href="?track={int(rid)}" style="text-decoration:none;color:inherit">
+              <img src="{img}" class="card-cover"/>
+              <div class="name">{name}</div>
+              <div class="artist-s">{artist}</div>
+            </a>
+            {pill}
+            <a class="btn" href="?track={int(rid)}">▶️ Open</a>
+          </div>
+        ''')
+    html.append('</div>')
+    st.markdown("\n".join(html), unsafe_allow_html=True)
 
 def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     try:
@@ -153,45 +149,35 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-col_home, col_title = st.columns([0.1, 0.9])
-with col_home:
-    st.button("🏠 Home", width="stretch", on_click=set_selected, args=(None,))
-with col_title:
+left, right = st.columns([0.12, 0.88])
+with left:
+    st.markdown('<a href="/" class="home-link">🏠 Home</a>', unsafe_allow_html=True)
+with right:
     st.title("Spotify Recommender")
-if pop_col:
-    st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {POP_CUTOFF:.1f}")
+if "selected_row_id" not in st.session_state:
+    st.session_state["selected_row_id"] = None
 
-try:
-    val = st.query_params.get("track")
-    if isinstance(val, (list, tuple)): val = val[0] if val else None
-    if val is not None:
-        st.session_state["selected_row_id"] = int(val)
-except Exception:
-    try:
-        params = st.experimental_get_query_params()
-        if "track" in params and params["track"]:
-            st.session_state["selected_row_id"] = int(params["track"][0])
-    except Exception:
-        pass
-
+set_selected_from_qs()
 selected_id = st.session_state.get("selected_row_id")
 
 if selected_id is None:
+    if pop_col:
+        st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {float(IDMAP[pop_col].quantile(TOP_QUANTILE)):.1f}")
     st.subheader("🔥 Top 10 Global")
     top_global = only_top(IDMAP).sort_values(pop_col, ascending=False) if pop_col else IDMAP
-    render_grid(top_global, key_prefix="global", take=10)
+    render_grid(top_global, take=10)
 
     st.markdown("---")
     st.subheader("🎛️ Top by random artists")
     artists = IDMAP[artist_col].dropna().unique().tolist()
     random.shuffle(artists)
-    for ai, a in enumerate(artists[:min(5, len(artists))]):
+    for a in artists[:min(5, len(artists))]:
         adf = only_top(IDMAP[IDMAP[artist_col] == a])
         if adf.empty: 
             continue
         st.markdown(f"**{a} — top tracks**")
         adf = adf.sort_values(pop_col, ascending=False) if pop_col else adf
-        render_grid(adf, key_prefix=f"artist_{ai}", take=10)
+        render_grid(adf, take=10)
 
 else:
     seed = IDMAP.loc[selected_id]
@@ -209,15 +195,15 @@ else:
         sim_df = sim_df.loc[sim_df.index != selected_id]
         sim_df = only_top(sim_df)
 
-    col1, col2 = st.columns(2)
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         st.markdown("**Same artist (top)**")
         if same_df.empty: st.info("No same-artist candidates.")
-        else: render_grid(same_df, key_prefix=f"same_{selected_id}", take=7)
-    with col2:
+        else: render_grid(same_df, take=7)
+    with c2:
         st.markdown("**Similar by audio (top)**")
         if sim_df.empty: st.info("No similar top candidates.")
-        else: render_grid(sim_df, key_prefix=f"sim_{selected_id}", take=7)
+        else: render_grid(sim_df, take=7)
 
 st.markdown("---")
 with st.expander("📈 Explore snapshot"):
