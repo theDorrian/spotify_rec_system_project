@@ -98,8 +98,8 @@ def build_random_blocks(k_artists: int = 4, take_tracks: int = 10):
         adf = only_top(IDMAP[IDMAP[artist_col] == a].copy())
         if pop_col in adf.columns:
             adf = adf.sort_values(pop_col, ascending=False)
-        # сохраняем именно row_id, чтобы при ререндере не «съезжало»
-        blocks.append((a, adf.index.tolist()[:take_tracks]))
+        row_ids = adf.index.tolist()[:take_tracks]  # ← до 10 треков
+        blocks.append((a, row_ids))
     return blocks
 
 # ---------- верхняя панель ----------
@@ -125,7 +125,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ---------- helpers ----------
 def open_track(row_id: int):
     st.session_state["selected_row_id"] = int(row_id)
-    st.session_state["q"] = ""  # скрыть поиск после выбора
+    st.session_state["q"] = ""  # скрыть результаты поиска после выбора
     st.rerun()
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
@@ -193,6 +193,7 @@ if st.session_state["selected_row_id"] is None and st.session_state["q"].strip()
 selected_id = st.session_state["selected_row_id"]
 
 if selected_id is None and search_results.empty:
+    # фиксируем блоки, если ещё не построены
     if st.session_state.get("rand_blocks") is None:
         st.session_state["rand_blocks"] = build_random_blocks()
 
@@ -208,7 +209,8 @@ if selected_id is None and search_results.empty:
     for ai, (artist_name, row_ids) in enumerate(st.session_state["rand_blocks"]):
         st.markdown(f"**{artist_name} — top tracks**")
         block_df = IDMAP.loc[[rid for rid in row_ids if rid in IDMAP.index]].copy()
-        render_grid(block_df, key_prefix=f"artist_{ai}", take=len(block_df), cols=5)
+        # гарантируем до 10 треков в секции
+        render_grid(block_df, key_prefix=f"artist_{ai}", take=10, cols=5)
 
 elif selected_id is not None:
     seed = IDMAP.loc[selected_id]
@@ -230,11 +232,11 @@ elif selected_id is not None:
     with c1:
         st.markdown('<div class="section-title">Same artist (top)</div>', unsafe_allow_html=True)
         if same_df.empty: st.info("No same-artist candidates.")
-        else: render_grid(same_df, key_prefix=f"same_{selected_id}", take=7, cols=3)
+        else: render_grid(same_df, key_prefix=f"same_{selected_id}", take=10, cols=5)
     with c2:
         st.markdown('<div class="section-title">Similar by audio (top)</div>', unsafe_allow_html=True)
         if sim_df.empty: st.info("No similar top candidates.")
-        else: render_grid(sim_df, key_prefix=f"sim_{selected_id}", take=7, cols=3)
+        else: render_grid(sim_df, key_prefix=f"sim_{selected_id}", take=10, cols=5)
 
 st.markdown("---")
 with st.expander("📈 Explore snapshot"):
