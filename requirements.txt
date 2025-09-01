@@ -8,3 +8,5 @@ joblib
 rapidfuzz
 plotly
 pyarrow
+spotipy
+python-dotenv
