@@ -126,20 +126,22 @@ def render_grid(df: pd.DataFrame, key_prefix: str, take: int = 10):
     st.markdown('<div class="grid">', unsafe_allow_html=True)
     for rid, r in df.iterrows():
         img = r.get(img_col, None) or "https://placehold.co/300x300?text=Track"
-        st.markdown(
-            f'''
-            <div class="card-box">
-              <img src="{img}" class="card-cover"/>
-              <div class="name">{r.get(name_col,"Unknown")}</div>
-              <div class="artist-s">{r.get(artist_col,"")}</div>
-              {f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col,None)) else ''}
-            </div>
-            ''',
-            unsafe_allow_html=True
-        )
-        st.button("▶️ Open", key=f"{key_prefix}_open_{rid}", width="stretch",
-                  on_click=set_selected, args=(int(rid),))
+        with st.container():
+            st.markdown('<div class="card-box">', unsafe_allow_html=True)
+            st.markdown(
+                f'''
+                <img src="{img}" class="card-cover"/>
+                <div class="name">{r.get(name_col,"Unknown")}</div>
+                <div class="artist-s">{r.get(artist_col,"")}</div>
+                {f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col,None)) else ''}
+                ''',
+                unsafe_allow_html=True
+            )
+            st.button("▶️ Open", key=f"{key_prefix}_open_{rid}",
+                      on_click=set_selected, args=(int(rid),))
+            st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     try:
