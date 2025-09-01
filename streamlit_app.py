@@ -7,13 +7,10 @@ from annoy import AnnoyIndex
 import joblib
 import plotly.express as px
 
-# ---------- базовые настройки ----------
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
-# ---------- стили (панель, карточки, ховеры) ----------
 st.markdown("""
 <style>
-/* top bar */
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
         background:rgba(9,12,18,.8); backdrop-filter: blur(6px); border-bottom:1px solid #1d2636;}
 .brand-btn>button{background:transparent;border:none;color:#fff;font-weight:800;font-size:1.2rem;cursor:pointer;}
@@ -22,21 +19,16 @@ st.markdown("""
 .avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#2b3446,#0f1726);
         border:1px solid #2b3446; display:inline-flex;align-items:center;justify-content:center;font-weight:700}
 .avatar small{opacity:.8}
-
-/* карточка */
 .stImage img { border-radius:12px; }
 .card-title{font-weight:600; margin:6px 0 2px 0; line-height:1.2; }
 .card-artist{opacity:.85; margin-bottom:4px;}
 .pop-pill{display:inline-block;border:1px solid #2a3242;border-radius:999px;padding:1px 8px;font-size:.75rem;opacity:.9}
 .open-btn>button{border:1px solid #2a3242;background:#0f1526;color:#e6e6e6;border-radius:10px}
 .open-btn>button:hover{border-color:#324158;background:#121a30}
-
-/* секции */
 .section-title{font-weight:700;font-size:1.1rem;margin:4px 0 10px 0}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- пути / артефакты ----------
 ART_DIR = Path("artifacts")
 TOP_QUANTILE = 0.70
 
@@ -88,38 +80,36 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
     return df.head(take) if take else df
 
 def set_selected_from_qs():
+    # единственный источник правды — ?track
     try:
-        val = st.query_params.get("track")
-        if isinstance(val, (list, tuple)): val = val[0] if val else None
-        if val is not None: st.session_state["selected_row_id"] = int(val)
+        params = st.experimental_get_query_params()
+        if "track" in params and params["track"]:
+            st.session_state["selected_row_id"] = int(params["track"][0])
+        elif "selected_row_id" not in st.session_state:
+            st.session_state["selected_row_id"] = None
     except Exception:
-        try:
-            params = st.experimental_get_query_params()
-            if "track" in params and params["track"]:
-                st.session_state["selected_row_id"] = int(params["track"][0])
-        except Exception:
-            pass
+        pass
 
-# ---------- верхняя панель: бренд (home), поиск, аккаунт ----------
+# ── топбар
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
 col_brand, col_search, col_avatar = st.columns([0.24, 0.56, 0.20])
 with col_brand:
     if st.button("🎧 Spotify Recommender", key="brand_home", help="Go home", use_container_width=True):
         st.session_state["selected_row_id"] = None
-        try:
-            qp = st.query_params
-            if "track" in qp: del qp["track"]
-        except Exception:
-            try: st.experimental_set_query_params()
-            except Exception: pass
-        st.rerun()
+        st.experimental_set_query_params()  # сбросить track
+        st.experimental_rerun()
 with col_search:
     q = st.text_input("Search", key="q", placeholder="Search tracks or artists…", label_visibility="collapsed")
 with col_avatar:
     st.markdown('<div style="text-align:right;"><span class="avatar"><small>AK</small></span></div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- отрисовка карточек ----------
+def open_track(row_id: int):
+    rid = int(row_id)
+    st.session_state["selected_row_id"] = rid
+    st.experimental_set_query_params(track=rid)
+    st.experimental_rerun()
+
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
     img = row.get(img_col) or "https://placehold.co/300x300?text=Track"
     st.image(img, width=190)
@@ -128,14 +118,8 @@ def render_card(row: pd.Series, row_id: int, key_prefix: str):
     if pop_col and pd.notna(row.get(pop_col, None)):
         st.markdown(f'<span class="pop-pill">pop {int(row[pop_col])}</span>', unsafe_allow_html=True)
     st.markdown('<div class="open-btn">', unsafe_allow_html=True)
-    if st.button("▶️ Open", key=f"{key_prefix}_open_{row_id}"):
-        st.session_state["selected_row_id"] = int(row_id)
-        try:
-            st.query_params["track"] = str(int(row_id))
-        except Exception:
-            try: st.experimental_set_query_params(track=int(row_id))
-            except Exception: pass
-        st.rerun()
+    if st.button("▶️ Open", key=f"{key_prefix}_open_{int(row_id)}"):
+        open_track(int(row_id))
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_grid(df: pd.DataFrame, key_prefix: str, take: int = 10, cols: int = 5):
@@ -146,7 +130,7 @@ def render_grid(df: pd.DataFrame, key_prefix: str, take: int = 10, cols: int = 5
         columns = st.columns(len(chunk), gap="large")
         for (rid, r), c in zip(chunk, columns):
             with c:
-                render_card(r, rid, key_prefix)
+                render_card(r, int(rid), key_prefix)
 
 def hero_card(row: pd.Series):
     c1, c2 = st.columns([1, 2], gap="large")
@@ -158,6 +142,8 @@ def hero_card(row: pd.Series):
         st.caption(str(row.get(artist_col, "")))
         if pop_col and pd.notna(row.get(pop_col, None)):
             st.markdown(f'**`pop {int(row[pop_col])}`**')
+        if prev_col and pd.notna(row.get(prev_col, None)):
+            st.audio(row[prev_col])
 
 def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     try:
@@ -169,21 +155,18 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ---------- состояние / роутинг ----------
 if "selected_row_id" not in st.session_state:
     st.session_state["selected_row_id"] = None
 set_selected_from_qs()
 selected_id = st.session_state.get("selected_row_id")
 
-# ---------- поиск ----------
+# поиск
 search_results = pd.DataFrame()
 if q and isinstance(q, str) and len(q.strip()) >= 2:
     ql = q.strip().lower()
-    name_series   = IDMAP[name_col].astype(str).str.lower()
-    artist_series = IDMAP[artist_col].astype(str).str.lower()
-    mask = name_series.str.contains(ql, na=False) | artist_series.str.contains(ql, na=False)
-    search_results = IDMAP[mask].copy()
-    search_results = only_top(search_results)
+    mask = IDMAP[name_col].astype(str).str.lower().str.contains(ql, na=False) | \
+           IDMAP[artist_col].astype(str).str.lower().str.contains(ql, na=False)
+    search_results = only_top(IDMAP[mask].copy())
     if pop_col in search_results.columns:
         search_results = search_results.sort_values(pop_col, ascending=False)
     st.subheader(f"🔎 Search results for: **{q}**")
@@ -193,7 +176,7 @@ if q and isinstance(q, str) and len(q.strip()) >= 2:
         render_grid(search_results, key_prefix="search", take=20, cols=5)
     st.markdown("---")
 
-# ---------- главная / детали ----------
+# главная/детали
 if selected_id is None and search_results.empty:
     if pop_col:
         st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {float(IDMAP[pop_col].quantile(TOP_QUANTILE)):.1f}")
@@ -209,7 +192,7 @@ if selected_id is None and search_results.empty:
         adf = only_top(IDMAP[IDMAP[artist_col] == a])
         if adf.empty: 
             continue
-        st.markdown(f"**{a} — top tracks**", help="Curated by popularity")
+        st.markdown(f"**{a} — top tracks**")
         adf = adf.sort_values(pop_col, ascending=False) if pop_col else adf
         render_grid(adf, key_prefix=f"artist_{ai}", take=10, cols=5)
 
