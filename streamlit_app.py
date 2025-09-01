@@ -1,4 +1,4 @@
-# streamlit_app.py — one-click select (on_click+rerun), Home button, no warnings
+# streamlit_app.py — uniform CSS grid, one-click select + rerun, Home button
 import json, random
 from pathlib import Path
 
@@ -20,11 +20,17 @@ st.markdown("""
         border-radius:16px;background:#101620}
   .title{font-weight:700;font-size:1.35rem;margin:2px 0}
   .artist{opacity:.9}
-  .rec-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:16px}
-  .card{border-radius:14px;background:#11161f;border:1px solid #1f2633;padding:10px;transition:transform .12s ease, border-color .12s ease}
+
+  /* универсальная сетка карточек: ровно и адаптивно */
+  .grid{display:grid;gap:16px;
+        grid-template-columns:repeat(auto-fill, minmax(210px,1fr))}
+  .card{border-radius:14px;background:#11161f;border:1px solid #1f2633;padding:10px;
+        transition:transform .12s ease, border-color .12s ease}
   .card:hover{transform:translateY(-3px);border-color:#2b3647}
-  .name{font-weight:600;margin-top:8px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .artist-s{opacity:.85;font-size:.9rem;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .name{font-weight:600;margin-top:8px;line-height:1.2;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .artist-s{opacity:.85;font-size:.9rem;
+        display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,7 +45,7 @@ def load_artifacts(art_dir: Path):
     with open(art_dir / "meta.json") as f:
         meta = json.load(f)
 
-    # предобученные артефакты (в UI не используем, но подхватываем для совместимости)
+    # подхватываем артефакты, чтобы убедиться что всё на месте
     try: joblib.load(art_dir / "scaler.joblib")
     except Exception: pass
     try: joblib.load(art_dir / "svd_64.joblib")
@@ -90,27 +96,22 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
 
 # ---------- State helpers ----------
 def set_selected(rid: int | None):
-    """Ставим/сбрасываем выбранный трек и сразу форсим rerun, чтобы клик работал с первого раза."""
+    """Ставим/сбрасываем выбранный трек и сразу форсим rerun (1 клик)."""
     if rid is None:
         st.session_state.pop("selected_row_id", None)
-        # Почистим URL (не обязательно, но приятно)
         try:
             qp = st.query_params
-            if "track" in qp:
-                del qp["track"]
+            if "track" in qp: del qp["track"]
         except Exception:
             try: st.experimental_set_query_params()
             except Exception: pass
     else:
         st.session_state["selected_row_id"] = int(rid)
-        # (Опц.) обновим URL — можно убрать, если не нужен пермалинк
         try:
-            st.query_params["track"] = str(int(rid))      # новый API
+            st.query_params["track"] = str(int(rid))
         except Exception:
-            try: st.experimental_set_query_params(track=int(rid))  # старый API
+            try: st.experimental_set_query_params(track=int(rid))
             except Exception: pass
-
-    # Ключевой момент: немедленная перерисовка
     try:
         st.rerun()
     except Exception:
@@ -140,18 +141,22 @@ def hero_card(row: pd.Series):
         if prev_col and pd.notna(row.get(prev_col, None)):
             st.audio(row[prev_col])
 
-def rec_grid(df: pd.DataFrame, key_prefix: str):
-    """Сетка реков (7 карточек) — выбор по on_click + rerun."""
-    df = dedup(df, take=7)
-    st.markdown('<div class="rec-grid">', unsafe_allow_html=True)
+def render_grid(df: pd.DataFrame, key_prefix: str, take: int = 10):
+    """Единая ровная сетка карточек (Top-10, артисты, рекомендации)."""
+    df = dedup(df, take=take)
+    st.markdown('<div class="grid">', unsafe_allow_html=True)
     for rid, r in df.iterrows():
         with st.container():
             st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
-            st.markdown(f'<div class="name">{r.get(name_col,"Unknown")}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="artist-s">{r.get(artist_col,"")}</div>', unsafe_allow_html=True)
+            st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"),
+                     use_container_width=True)
+            st.markdown(f'<div class="name">{r.get(name_col,"Unknown")}</div>',
+                        unsafe_allow_html=True)
+            st.markdown(f'<div class="artist-s">{r.get(artist_col,"")}</div>',
+                        unsafe_allow_html=True)
             if pop_col and pd.notna(r.get(pop_col, None)):
-                st.markdown(f'<span class="pill">pop {int(r[pop_col])}</span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="pill">pop {int(r[pop_col])}</span>',
+                            unsafe_allow_html=True)
             st.button("▶️ Open",
                       key=f"{key_prefix}_open_{rid}",
                       use_container_width=True,
@@ -172,13 +177,14 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
 # ---------- Header + Home ----------
 col_home, col_title = st.columns([0.1, 0.9])
 with col_home:
-    st.button("🏠 Home", use_container_width=True, on_click=set_selected, args=(None,))
+    st.button("🏠 Home", use_container_width=True,
+              on_click=set_selected, args=(None,))
 with col_title:
     st.title("Spotify Recommender")
 if pop_col:
     st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {POP_CUTOFF:.1f}")
 
-# восстановление выбора из URL
+# восстановление выбора из URL (если был пермалинк)
 try:
     val = st.query_params.get("track")
     if isinstance(val, (list, tuple)): val = val[0] if val else None
@@ -196,20 +202,10 @@ except Exception:
 selected_id = st.session_state.get("selected_row_id")
 
 if selected_id is None:
-    # Landing: Top-10 + random artists
+    # Landing: Top-10 + random artists — обе секции теперь через ровную render_grid
     st.subheader("🔥 Top 10 Global")
     top_global = only_top(IDMAP).sort_values(pop_col, ascending=False) if pop_col else IDMAP
-    top_global = dedup(top_global, take=10)
-    cols = st.columns(5)
-    for i, (rid, r) in enumerate(top_global.iterrows()):
-        with cols[i % 5]:
-            st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
-            st.write(f"**{r.get(name_col,'Unknown')}**")
-            st.caption(r.get(artist_col, ""))
-            st.button("▶️ Open",
-                      key=f"landing_open_{rid}",
-                      use_container_width=True,
-                      on_click=set_selected, args=(int(rid),))
+    render_grid(top_global, key_prefix="global", take=10)
 
     st.markdown("---")
     st.subheader("🎛️ Top by random artists")
@@ -217,20 +213,11 @@ if selected_id is None:
     random.shuffle(artists)
     for ai, a in enumerate(artists[:min(5, len(artists))]):
         adf = only_top(IDMAP[IDMAP[artist_col] == a])
-        if adf.empty:
+        if adf.empty: 
             continue
         st.markdown(f"**{a} — top tracks**")
-        adf = dedup(adf.sort_values(pop_col, ascending=False) if pop_col else adf, take=10)
-        cols = st.columns(5)
-        for i, (rid, r) in enumerate(adf.iterrows()):
-            with cols[i % 5]:
-                st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
-                st.write(f"**{r.get(name_col,'Unknown')}**")
-                st.caption(r.get(artist_col, ""))
-                st.button("▶️ Open",
-                          key=f"artist_{ai}_open_{rid}",
-                          use_container_width=True,
-                          on_click=set_selected, args=(int(rid),))
+        adf = adf.sort_values(pop_col, ascending=False) if pop_col else adf
+        render_grid(adf, key_prefix=f"artist_{ai}", take=10)
 
 else:
     # Detail-only page
@@ -253,11 +240,11 @@ else:
     with col1:
         st.markdown("**Same artist (top)**")
         if same_df.empty: st.info("No same-artist candidates.")
-        else: rec_grid(same_df, key_prefix=f"same_{selected_id}")
+        else: render_grid(same_df, key_prefix=f"same_{selected_id}", take=7)
     with col2:
         st.markdown("**Similar by audio (top)**")
         if sim_df.empty: st.info("No similar top candidates.")
-        else: rec_grid(sim_df, key_prefix=f"sim_{selected_id}")
+        else: render_grid(sim_df, key_prefix=f"sim_{selected_id}", take=7)
 
 # ---------- Explore snapshot ----------
 st.markdown("---")
