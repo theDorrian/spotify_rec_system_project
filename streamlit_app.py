@@ -1,4 +1,4 @@
-# streamlit_app.py — uniform CSS grid, one-click select + rerun, Home button
+# streamlit_app.py — fixed-width CSS grid, one-click select + rerun, Home button
 import json, random
 from pathlib import Path
 
@@ -21,21 +21,36 @@ st.markdown("""
   .title{font-weight:700;font-size:1.35rem;margin:2px 0}
   .artist{opacity:.9}
 
-  /* универсальная сетка карточек: ровно и адаптивно */
-  .grid{display:grid;gap:16px;
-        grid-template-columns:repeat(auto-fill, minmax(210px,1fr))}
-  .card{border-radius:14px;background:#11161f;border:1px solid #1f2633;padding:10px;
-        transition:transform .12s ease, border-color .12s ease}
+  /* Ровная фикс-сетка: карточка 210px, без растяжения на всю ширину */
+  .grid{
+    display:grid;
+    gap:16px;
+    grid-template-columns: repeat(auto-fill, 210px);
+    justify-content: start;   /* начинаем слева, не центрируем и не растягиваем */
+    align-content: start;
+  }
+  .card{
+    width:210px;
+    border-radius:14px;
+    background:#11161f;
+    border:1px solid #1f2633;
+    padding:10px;
+    transition:transform .12s ease, border-color .12s ease
+  }
   .card:hover{transform:translateY(-3px);border-color:#2b3647}
-  .name{font-weight:600;margin-top:8px;line-height:1.2;
-        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .artist-s{opacity:.85;font-size:.9rem;
-        display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .name{
+    font-weight:600;margin-top:8px;line-height:1.2;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden
+  }
+  .artist-s{
+    opacity:.85;font-size:.9rem;
+    display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden
+  }
 </style>
 """, unsafe_allow_html=True)
 
 ART_DIR = Path("artifacts")
-TOP_QUANTILE = 0.70  # топ по популярности
+TOP_QUANTILE = 0.70  # «топ» по популярности
 
 # ---------- Load artifacts ----------
 @st.cache_resource(show_spinner=False)
@@ -45,7 +60,7 @@ def load_artifacts(art_dir: Path):
     with open(art_dir / "meta.json") as f:
         meta = json.load(f)
 
-    # подхватываем артефакты, чтобы убедиться что всё на месте
+    # наличие артефактов (в UI не используем, но проверяем)
     try: joblib.load(art_dir / "scaler.joblib")
     except Exception: pass
     try: joblib.load(art_dir / "svd_64.joblib")
@@ -121,8 +136,9 @@ def set_selected(rid: int | None):
 def hero_card(row: pd.Series):
     c1, c2 = st.columns([1, 2], gap="large")
     with c1:
+        # фиксируем размер, чтобы обложка не растягивалась на всю страницу
         st.image(row.get(img_col, "https://placehold.co/600x600?text=Album"),
-                 use_container_width=False)
+                 width=240, use_container_width=False)
     with c2:
         st.markdown('<div class="hero">', unsafe_allow_html=True)
         st.markdown(
@@ -202,7 +218,7 @@ except Exception:
 selected_id = st.session_state.get("selected_row_id")
 
 if selected_id is None:
-    # Landing: Top-10 + random artists — обе секции теперь через ровную render_grid
+    # Landing: Top-10 + random artists — обе секции рисуем через ровную render_grid
     st.subheader("🔥 Top 10 Global")
     top_global = only_top(IDMAP).sort_values(pop_col, ascending=False) if pop_col else IDMAP
     render_grid(top_global, key_prefix="global", take=10)
