@@ -11,35 +11,16 @@ st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="w
 
 st.markdown("""
 <style>
-  .pill{display:inline-block;padding:2px 10px;border-radius:999px;border:1px solid #2a3242;
-        font-size:.75rem;opacity:.9;margin-right:6px}
-  .hero{display:flex;gap:22px;align-items:center;padding:16px;border:1px solid #1f2633;
-        border-radius:16px;background:#101620}
+  .pill{display:inline-block;padding:2px 10px;border-radius:999px;border:1px solid #2a3242;font-size:.75rem;opacity:.9;margin-right:6px}
+  .hero{display:flex;gap:22px;align-items:center;padding:16px;border:1px solid #1f2633;border-radius:16px;background:#101620}
   .title{font-weight:700;font-size:1.35rem;margin:2px 0}
   .artist{opacity:.9}
-  .hero-cover{
-    width:240px !important; height:240px !important;
-    max-width:240px !important; max-height:240px !important;
-    border-radius:14px; object-fit:cover; display:block;
-  }
-  .grid{
-    display:grid; gap:16px;
-    grid-template-columns: repeat(auto-fill, 210px);
-    justify-content: start; align-content: start;
-  }
-  .card{
-    width:210px; border-radius:14px; background:#11161f; border:1px solid #1f2633; padding:10px;
-    transition:transform .12s ease, border-color .12s ease;
-  }
-  .card:hover{transform:translateY(-3px);border-color:#2b3647}
-  .name{
-    font-weight:600;margin-top:8px;line-height:1.2;
-    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden
-  }
-  .artist-s{
-    opacity:.85;font-size:.9rem;
-    display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden
-  }
+  .hero-cover{width:240px !important;height:240px !important;max-width:240px !important;max-height:240px !important;border-radius:14px;object-fit:cover;display:block}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,210px);justify-content:start;align-content:start}
+  .card-box{width:210px;border-radius:14px;background:#11161f;border:1px solid #1f2633;padding:10px}
+  .card-cover{width:190px;height:190px;border-radius:12px;object-fit:cover;display:block;margin:0 auto}
+  .name{font-weight:600;margin-top:8px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .artist-s{opacity:.85;font-size:.9rem;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 </style>
 """, unsafe_allow_html=True)
 
@@ -144,22 +125,20 @@ def render_grid(df: pd.DataFrame, key_prefix: str, take: int = 10):
     df = dedup(df, take=take)
     st.markdown('<div class="grid">', unsafe_allow_html=True)
     for rid, r in df.iterrows():
-        with st.container():
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"),
-                     use_container_width=True)
-            st.markdown(f'<div class="name">{r.get(name_col,"Unknown")}</div>',
-                        unsafe_allow_html=True)
-            st.markdown(f'<div class="artist-s">{r.get(artist_col,"")}</div>',
-                        unsafe_allow_html=True)
-            if pop_col and pd.notna(r.get(pop_col, None)):
-                st.markdown(f'<span class="pill">pop {int(r[pop_col])}</span>',
-                            unsafe_allow_html=True)
-            st.button("▶️ Open",
-                      key=f"{key_prefix}_open_{rid}",
-                      use_container_width=True,
-                      on_click=set_selected, args=(int(rid),))
-            st.markdown('</div>', unsafe_allow_html=True)
+        img = r.get(img_col, None) or "https://placehold.co/300x300?text=Track"
+        st.markdown(
+            f'''
+            <div class="card-box">
+              <img src="{img}" class="card-cover"/>
+              <div class="name">{r.get(name_col,"Unknown")}</div>
+              <div class="artist-s">{r.get(artist_col,"")}</div>
+              {f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col,None)) else ''}
+            </div>
+            ''',
+            unsafe_allow_html=True
+        )
+        st.button("▶️ Open", key=f"{key_prefix}_open_{rid}", width="stretch",
+                  on_click=set_selected, args=(int(rid),))
     st.markdown('</div>', unsafe_allow_html=True)
 
 def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
@@ -174,8 +153,7 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
 
 col_home, col_title = st.columns([0.1, 0.9])
 with col_home:
-    st.button("🏠 Home", use_container_width=True,
-              on_click=set_selected, args=(None,))
+    st.button("🏠 Home", width="stretch", on_click=set_selected, args=(None,))
 with col_title:
     st.title("Spotify Recommender")
 if pop_col:
