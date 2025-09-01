@@ -1,4 +1,4 @@
-# streamlit_app.py — one-click select, Home button, no warnings
+# streamlit_app.py — one-click select (on_click+rerun), Home button, no warnings
 import json, random
 from pathlib import Path
 
@@ -39,7 +39,7 @@ def load_artifacts(art_dir: Path):
     with open(art_dir / "meta.json") as f:
         meta = json.load(f)
 
-    # предобученные артефакты (в UI не используем, но держим для совместимости)
+    # предобученные артефакты (в UI не используем, но подхватываем для совместимости)
     try: joblib.load(art_dir / "scaler.joblib")
     except Exception: pass
     try: joblib.load(art_dir / "svd_64.joblib")
@@ -88,32 +88,40 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
         df = df.drop_duplicates(subset=subs) if subs else df
     return df.head(take) if take else df
 
-# ---------- Helpers ----------
+# ---------- State helpers ----------
 def set_selected(rid: int | None):
-    """Set or clear selected track; keep URL in sync if возможно."""
+    """Ставим/сбрасываем выбранный трек и сразу форсим rerun, чтобы клик работал с первого раза."""
     if rid is None:
         st.session_state.pop("selected_row_id", None)
+        # Почистим URL (не обязательно, но приятно)
         try:
             qp = st.query_params
-            if "track" in qp: del qp["track"]
+            if "track" in qp:
+                del qp["track"]
         except Exception:
             try: st.experimental_set_query_params()
             except Exception: pass
     else:
         st.session_state["selected_row_id"] = int(rid)
+        # (Опц.) обновим URL — можно убрать, если не нужен пермалинк
         try:
-            st.query_params["track"] = str(int(rid))      # новый API (>=1.32)
+            st.query_params["track"] = str(int(rid))      # новый API
         except Exception:
             try: st.experimental_set_query_params(track=int(rid))  # старый API
             except Exception: pass
 
+    # Ключевой момент: немедленная перерисовка
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
+
+# ---------- UI pieces ----------
 def hero_card(row: pd.Series):
     c1, c2 = st.columns([1, 2], gap="large")
     with c1:
-        st.image(
-            row.get(img_col, "https://placehold.co/600x600?text=Album"),
-            use_container_width=False
-        )
+        st.image(row.get(img_col, "https://placehold.co/600x600?text=Album"),
+                 use_container_width=False)
     with c2:
         st.markdown('<div class="hero">', unsafe_allow_html=True)
         st.markdown(
@@ -133,7 +141,7 @@ def hero_card(row: pd.Series):
             st.audio(row[prev_col])
 
 def rec_grid(df: pd.DataFrame, key_prefix: str):
-    """Рендер компактной сетки рекомендаций (7 карточек) с одним кликом."""
+    """Сетка реков (7 карточек) — выбор по on_click + rerun."""
     df = dedup(df, take=7)
     st.markdown('<div class="rec-grid">', unsafe_allow_html=True)
     for rid, r in df.iterrows():
@@ -144,9 +152,10 @@ def rec_grid(df: pd.DataFrame, key_prefix: str):
             st.markdown(f'<div class="artist-s">{r.get(artist_col,"")}</div>', unsafe_allow_html=True)
             if pop_col and pd.notna(r.get(pop_col, None)):
                 st.markdown(f'<span class="pill">pop {int(r[pop_col])}</span>', unsafe_allow_html=True)
-            # один клик — без HTML-кнопок
-            if st.button("▶️ Open", key=f"{key_prefix}_open_{rid}", use_container_width=True):
-                set_selected(int(rid))
+            st.button("▶️ Open",
+                      key=f"{key_prefix}_open_{rid}",
+                      use_container_width=True,
+                      on_click=set_selected, args=(int(rid),))
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -160,30 +169,28 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ---------- Header with Home ----------
+# ---------- Header + Home ----------
 col_home, col_title = st.columns([0.1, 0.9])
 with col_home:
-    if st.button("🏠 Home", use_container_width=True):
-        set_selected(None)
+    st.button("🏠 Home", use_container_width=True, on_click=set_selected, args=(None,))
 with col_title:
     st.title("Spotify Recommender")
 if pop_col:
     st.caption(f"Using popularity cutoff at {TOP_QUANTILE:.2f} quantile → {POP_CUTOFF:.1f}")
 
-# restore selection from URL (new/old APIs)
-sel_from_url = None
+# восстановление выбора из URL
 try:
     val = st.query_params.get("track")
     if isinstance(val, (list, tuple)): val = val[0] if val else None
-    if val is not None: sel_from_url = int(val)
+    if val is not None:
+        st.session_state["selected_row_id"] = int(val)
 except Exception:
     try:
         params = st.experimental_get_query_params()
-        if "track" in params and params["track"]: sel_from_url = int(params["track"][0])
+        if "track" in params and params["track"]:
+            st.session_state["selected_row_id"] = int(params["track"][0])
     except Exception:
         pass
-if sel_from_url is not None:
-    st.session_state["selected_row_id"] = sel_from_url
 
 # ---------- Either Landing or Detail ----------
 selected_id = st.session_state.get("selected_row_id")
@@ -199,8 +206,10 @@ if selected_id is None:
             st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
             st.write(f"**{r.get(name_col,'Unknown')}**")
             st.caption(r.get(artist_col, ""))
-            if st.button("▶️ Open", key=f"landing_open_{rid}", use_container_width=True):
-                set_selected(int(rid))
+            st.button("▶️ Open",
+                      key=f"landing_open_{rid}",
+                      use_container_width=True,
+                      on_click=set_selected, args=(int(rid),))
 
     st.markdown("---")
     st.subheader("🎛️ Top by random artists")
@@ -208,7 +217,7 @@ if selected_id is None:
     random.shuffle(artists)
     for ai, a in enumerate(artists[:min(5, len(artists))]):
         adf = only_top(IDMAP[IDMAP[artist_col] == a])
-        if adf.empty: 
+        if adf.empty:
             continue
         st.markdown(f"**{a} — top tracks**")
         adf = dedup(adf.sort_values(pop_col, ascending=False) if pop_col else adf, take=10)
@@ -218,8 +227,10 @@ if selected_id is None:
                 st.image(r.get(img_col, "https://placehold.co/300x300?text=Track"), use_container_width=True)
                 st.write(f"**{r.get(name_col,'Unknown')}**")
                 st.caption(r.get(artist_col, ""))
-                if st.button("▶️ Open", key=f"artist_{ai}_open_{rid}", use_container_width=True):
-                    set_selected(int(rid))
+                st.button("▶️ Open",
+                          key=f"artist_{ai}_open_{rid}",
+                          use_container_width=True,
+                          on_click=set_selected, args=(int(rid),))
 
 else:
     # Detail-only page
