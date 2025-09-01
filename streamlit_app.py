@@ -21,10 +21,7 @@ st.markdown("""
   .card-cover{width:190px;height:190px;border-radius:12px;object-fit:cover;display:block;margin:0 auto}
   .name{font-weight:600;margin-top:8px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .artist-s{opacity:.85;font-size:.9rem;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
-  .btn{display:inline-block;margin-top:8px;padding:6px 12px;border:1px solid #2a3242;border-radius:10px;text-decoration:none;color:#e6e6e6;background:#0d1220}
-  .btn:hover{border-color:#2b3647;background:#0f1526}
-  .home-link{display:inline-block;padding:6px 12px;border:1px solid #2a3242;border-radius:10px;text-decoration:none;color:#e6e6e6;background:#0d1220}
-  .home-link:hover{border-color:#2b3647;background:#0f1526}
+  .btn-wrap{margin-top:8px}
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,26 +113,31 @@ def hero_card(row: pd.Series):
 
 def render_grid(df: pd.DataFrame, take: int = 10):
     df = dedup(df, take=take)
-    parts = ['<div class="grid">']
+    st.markdown('<div class="grid">', unsafe_allow_html=True)
     for rid, r in df.iterrows():
         img   = r.get(img_col) or "https://placehold.co/300x300?text=Track"
         name  = str(r.get(name_col, "Unknown"))
         artist= str(r.get(artist_col, ""))
         pill  = f'<span class="pill">pop {int(r[pop_col])}</span>' if pop_col and pd.notna(r.get(pop_col, None)) else ''
-        parts.append(f"""
+        with st.container():
+            st.markdown(textwrap.dedent(f"""
 <div class="card-box">
-  <a href="?track={int(rid)}" style="text-decoration:none;color:inherit">
-    <img src="{img}" class="card-cover"/>
-    <div class="name">{name}</div>
-    <div class="artist-s">{artist}</div>
-  </a>
+  <img src="{img}" class="card-cover"/>
+  <div class="name">{name}</div>
+  <div class="artist-s">{artist}</div>
   {pill}
-  <a class="btn" href="?track={int(rid)}">▶️ Open</a>
+  <div class="btn-wrap"></div>
 </div>
-""")
-    parts.append('</div>')
-    html = textwrap.dedent("\n".join(parts))
-    st.markdown(html, unsafe_allow_html=True)
+"""), unsafe_allow_html=True)
+            if st.button("▶️ Open", key=f"open_{rid}"):
+                st.session_state["selected_row_id"] = int(rid)
+                try:
+                    st.query_params["track"] = str(int(rid))
+                except Exception:
+                    try: st.experimental_set_query_params(track=int(rid))
+                    except Exception: pass
+                st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
     try:
@@ -149,7 +151,15 @@ def similar_items(row_id: int, k: int = 80) -> pd.DataFrame:
 
 left, right = st.columns([0.12, 0.88])
 with left:
-    st.markdown('<a href="/" class="home-link">🏠 Home</a>', unsafe_allow_html=True)
+    if st.button("🏠 Home"):
+        st.session_state["selected_row_id"] = None
+        try:
+            qp = st.query_params
+            if "track" in qp: del qp["track"]
+        except Exception:
+            try: st.experimental_set_query_params()
+            except Exception: pass
+        st.rerun()
 with right:
     st.title("Spotify Recommender")
 
