@@ -6,11 +6,9 @@ import pandas as pd
 import streamlit as st
 from annoy import AnnoyIndex
 import joblib
-import plotly.express as px
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
-# ---------- стили ----------
 st.markdown("""
 <style>
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
@@ -86,7 +84,7 @@ if "selected_row_id" not in st.session_state:
 if "q" not in st.session_state:
     st.session_state["q"] = ""
 if "rand_cut_ids" not in st.session_state:
-    st.session_state["rand_cut_ids"] = None  # сохранённый сэмпл для Random 10
+    st.session_state["rand_cut_ids"] = None
 
 # ---------- верхняя панель ----------
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
@@ -109,7 +107,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ---------- helpers ----------
 def open_track(row_id: int):
     st.session_state["selected_row_id"] = int(row_id)
-    st.session_state["q"] = ""  # скрыть результаты поиска после клика
+    st.session_state["q"] = ""
     st.rerun()
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
@@ -171,7 +169,7 @@ def sample_random_cut_ids(k: int = 10) -> list[int]:
     k = min(k, len(pool_ids))
     return random.sample(pool_ids, k)
 
-# ---------- поиск (работает всегда) ----------
+# ---------- поиск ----------
 search_results = pd.DataFrame()
 if st.session_state["q"].strip():
     ql = st.session_state["q"].strip().lower()
@@ -187,7 +185,7 @@ if st.session_state["q"].strip():
         render_grid(search_results, key_prefix="search", take=20, cols=5)
     st.markdown("---")
 
-# ---------- основное / детали ----------
+# ---------- основное ----------
 selected_id = st.session_state["selected_row_id"]
 
 if pop_col:
@@ -225,7 +223,7 @@ else:
 st.markdown("---")
 left, right = st.columns([0.9, 0.1])
 with left:
-    st.subheader("⭐ Random 10 (pop ≥ cutoff, not in Top 10 Global)")
+    st.subheader("⭐ Random 10")
 with right:
     if st.button("🎲 Shuffle", use_container_width=True):
         st.session_state["rand_cut_ids"] = sample_random_cut_ids(10)
@@ -236,14 +234,3 @@ if not st.session_state["rand_cut_ids"]:
 rand_ids = st.session_state["rand_cut_ids"]
 rand_df = IDMAP.loc[rand_ids].copy() if rand_ids else pd.DataFrame()
 render_grid(rand_df, key_prefix="randcut", take=10, cols=5)
-
-st.markdown("---")
-with st.expander("📈 Explore snapshot"):
-    if artist_col in IDMAP.columns:
-        top_art = IDMAP[artist_col].value_counts().head(20).reset_index()
-        top_art.columns = ["artist","count"]
-        fig = px.bar(top_art, x="artist", y="count")
-        st.plotly_chart(fig, use_container_width=True)
-    if pop_col in IDMAP.columns:
-        fig2 = px.histogram(IDMAP, x=pop_col, nbins=40)
-        st.plotly_chart(fig2, use_container_width=True)
