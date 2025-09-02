@@ -9,7 +9,7 @@ from annoy import AnnoyIndex
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
-# ============================ STYLES ============================
+# --------------------------- CSS ---------------------------
 st.markdown("""
 <style>
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
@@ -19,7 +19,6 @@ st.markdown("""
         border:1px solid #2b3446; display:inline-flex;align-items:center;justify-content:center;font-weight:700}
 .avatar small{opacity:.8}
 
-/* карточки — ровная сетка */
 .card{
   background: rgba(255,255,255,0.02);
   border: 1px solid #2a3242;
@@ -39,14 +38,13 @@ st.markdown("""
 .card .artist{ opacity:.85; font-size:.8rem; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .card .meta{ font-size:.75rem; text-align:center; }
 .pop-pill{ display:inline-block; border:1px solid #2a3242; border-radius:999px; padding:1px 8px; font-size:.75rem; opacity:.9 }
-.grid-row{ display:flex; gap:22px; flex-wrap:wrap; margin-bottom:18px }
 .section-title{ font-weight:700; font-size:1.15rem; margin:6px 0 10px 0 }
 .stButton>button{ width:100%; border:1px solid #2a3242; background:#0f1526; color:#e6e6e6; border-radius:10px }
 .stButton>button:hover{ border-color:#324158; background:#121a30 }
 </style>
 """, unsafe_allow_html=True)
 
-# ============================ ARTIFACTS ============================
+# --------------------------- ARTIFACTS ---------------------------
 ART_DIR = Path("artifacts")
 
 @st.cache_resource(show_spinner=False)
@@ -77,7 +75,6 @@ def load_artifacts(art_dir: Path):
 
 meta, IDMAP, ANNOY = load_artifacts(ART_DIR)
 
-# column names
 NAME  = meta.get("track_name_col")  or "track_name"
 ART   = meta.get("artist_name_col") or "artist_name"
 TID   = meta.get("track_id_col")    or "track_id"
@@ -88,16 +85,23 @@ PREV  = "preview_url"if "preview_url"in IDMAP.columns else None
 CUT_Q = 0.70
 CUT   = float(IDMAP[POP].quantile(CUT_Q)) if POP else None
 
+def dedup(df: pd.DataFrame) -> pd.DataFrame:
+    if TID in df.columns:
+        return df.drop_duplicates(subset=[TID])
+    return df.drop_duplicates(subset=[NAME, ART])
+
 def only_top(df: pd.DataFrame) -> pd.DataFrame:
     if POP is None: return df
     return df[df[POP] >= CUT]
 
 def top10_global() -> pd.DataFrame:
-    if POP: return only_top(IDMAP).sort_values(POP, ascending=False).head(10)
-    return IDMAP.head(10)
+    if POP:
+        pool = dedup(only_top(IDMAP)).sort_values(POP, ascending=False)
+        return pool.head(10)
+    return dedup(IDMAP).head(10)
 
 def random10_cut_exclude(exclude_ids: set[int]) -> pd.DataFrame:
-    pool = only_top(IDMAP)
+    pool = dedup(only_top(IDMAP))
     ids = [i for i in pool.index if i not in exclude_ids]
     k = min(10, len(ids))
     if k == 0: return pd.DataFrame()
@@ -114,7 +118,7 @@ def annoy_similar(row_id: int, k: int = 80) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-# ============================ STATE + TOP BAR ============================
+# --------------------------- STATE + TOPBAR ---------------------------
 if "selected_id" not in st.session_state:
     st.session_state.selected_id = None
 if "q" not in st.session_state:
@@ -140,10 +144,10 @@ with c3:
                 unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ============================ RENDER HELPERS ============================
+# --------------------------- RENDER HELPERS ---------------------------
 def open_track(row_id: int):
     st.session_state.selected_id = int(row_id)
-    st.session_state.q = ""  # скрыть старые результаты поиска
+    st.session_state.q = ""  # скрыть результаты поиска
     st.rerun()
 
 def card(row: pd.Series, row_id: int, key_prefix: str):
@@ -151,7 +155,6 @@ def card(row: pd.Series, row_id: int, key_prefix: str):
     title = row.get(NAME, "—")
     artist = row.get(ART,  "—")
     pop_txt = f'pop {int(row[POP])}' if POP and pd.notna(row.get(POP)) else ""
-
     st.markdown(
         f"""
         <div class="card">
@@ -166,19 +169,17 @@ def card(row: pd.Series, row_id: int, key_prefix: str):
     if st.button("▶ Open", key=f"{key_prefix}_{int(row_id)}"):
         open_track(int(row_id))
 
-def grid(df: pd.DataFrame, key_prefix: str, take: int = 10):
+def grid(df: pd.DataFrame, key_prefix: str, take: int = 10, per_row: int = 5):
     if df is None or df.empty:
         st.info("No items.")
         return
-    df = df.drop_duplicates(subset=[TID] if TID in df.columns else [NAME, ART]).head(take)
+    df = dedup(df).head(take)
     rows = list(df.iterrows())
-    for i in range(0, len(rows), 5):
-        chunk = rows[i:i+5]
-        st.markdown('<div class="grid-row">', unsafe_allow_html=True)
+    for i in range(0, len(rows), per_row):
+        chunk = rows[i:i+per_row]
         cols = st.columns(len(chunk), gap="large")
         for (rid, r), c in zip(chunk, cols):
             with c: card(r, int(rid), key_prefix)
-        st.markdown('</div>', unsafe_allow_html=True)
 
 def hero(row: pd.Series):
     c1, c2 = st.columns([1, 2], gap="large")
@@ -193,7 +194,7 @@ def hero(row: pd.Series):
         if PREV and pd.notna(row.get(PREV, None)):
             st.audio(row[PREV])
 
-# ============================ SEARCH (всегда активен) ============================
+# --------------------------- SEARCH ---------------------------
 if st.session_state.q.strip():
     q = st.session_state.q.lower().strip()
     mask = IDMAP[NAME].astype(str).str.lower().str.contains(q, na=False) | \
@@ -201,17 +202,17 @@ if st.session_state.q.strip():
     res = IDMAP[mask].copy()
     if POP: res = res.sort_values(POP, ascending=False)
     st.subheader(f"🔎 Search: **{st.session_state.q}**")
-    grid(res, "search", take=20)
+    grid(res, "search", take=20, per_row=5)
     st.markdown("---")
 
-# ============================ MAIN / DETAILS ============================
+# --------------------------- MAIN / DETAILS ---------------------------
 if POP:
     st.caption(f"Using popularity cutoff at {CUT_Q:.2f} quantile → {CUT:.1f}")
 
 sid = st.session_state.selected_id
 if sid is None:
     st.subheader("🔥 Top 10 Global")
-    grid(top10_global(), "top10", take=10)
+    grid(top10_global(), "top10", take=10, per_row=5)
 else:
     st.subheader("Now playing")
     hero(IDMAP.loc[sid])
@@ -224,18 +225,18 @@ else:
         same = IDMAP[(IDMAP[ART] == IDMAP.loc[sid, ART]) & (IDMAP.index != sid)].copy()
         same = only_top(same)
         if POP: same = same.sort_values(POP, ascending=False)
-        grid(same, f"same_{sid}", take=10)
+        grid(same, f"same_{sid}", take=10, per_row=3)
 
     with c2:
         st.markdown('<div class="section-title">Similar by audio (top)</div>', unsafe_allow_html=True)
         sim = annoy_similar(sid)
         sim = sim[sim.index != sid]
         sim = only_top(sim)
-        grid(sim, f"sim_{sid}", take=10)
+        grid(sim, f"sim_{sid}", take=10, per_row=3)
 
 st.markdown("---")
 
-# ============================ RANDOM 10 ============================
+# --------------------------- RANDOM 10 ---------------------------
 left, right = st.columns([0.9, 0.1])
 with left:
     st.subheader("⭐ Random 10")
@@ -249,4 +250,4 @@ if st.session_state.rand_ids is None:
     st.session_state.rand_ids = random10_cut_exclude(exclude).index.tolist()
 
 rand_df = IDMAP.loc[st.session_state.rand_ids] if st.session_state.rand_ids else pd.DataFrame()
-grid(rand_df, "rand10", take=10)
+grid(rand_df, "rand10", take=10, per_row=5)
