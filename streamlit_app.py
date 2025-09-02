@@ -9,6 +9,7 @@ import joblib
 
 st.set_page_config(page_title="Spotify Recommender", page_icon="🎧", layout="wide")
 
+# =====================  STYLES  =====================
 st.markdown("""
 <style>
 .topbar{position:sticky; top:0; z-index:999; padding:10px 14px; margin:-10px -14px 16px -14px;
@@ -17,17 +18,40 @@ st.markdown("""
 .avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#2b3446,#0f1726);
         border:1px solid #2b3446; display:inline-flex;align-items:center;justify-content:center;font-weight:700}
 .avatar small{opacity:.8}
-.stImage img { border-radius:12px; }
-.card-title{font-weight:600; margin:6px 0 2px 0; line-height:1.2; }
-.card-artist{opacity:.85; margin-bottom:4px;}
+
+/* ---- ровные карточки ---- */
+.card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid #2a3242;
+  border-radius: 14px;
+  padding: 12px;
+  height: 330px;                    /* одинаковая высота */
+  display: flex; flex-direction: column; gap: 8px;
+}
+.card .cover { width:100%; aspect-ratio: 1/1; border-radius:10px; overflow:hidden; background:#1b2335; }
+.card .cover img { width:100%; height:100%; object-fit:cover; }
+.card .title{
+  font-weight:600; line-height:1.15;
+  height:42px;                      /* место под 2 строки */
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.card .artist{
+  opacity:.85; height:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.card .meta{ min-height:20px; }
 .pop-pill{display:inline-block;border:1px solid #2a3242;border-radius:999px;padding:1px 8px;font-size:.75rem;opacity:.9}
-.open-btn>button{border:1px solid #2a3242;background:#0f1526;color:#e6e6e6;border-radius:10px}
-.open-btn>button:hover{border-color:#324158;background:#121a30}
+
+/* кнопки везде одинаковые */
+.stButton>button{
+  width:100%; border:1px solid #2a3242; background:#0f1526; color:#e6e6e6; border-radius:10px
+}
+.stButton>button:hover{border-color:#324158;background:#121a30}
+
 .section-title{font-weight:700;font-size:1.1rem;margin:4px 0 10px 0}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- артефакты ----------
+# =====================  LOAD ARTIFACTS  =====================
 ART_DIR = Path("artifacts")
 TOP_QUANTILE = 0.70
 
@@ -39,16 +63,16 @@ def load_artifacts(art_dir: Path):
     except Exception: pass
     try: joblib.load(art_dir / "svd_64.joblib")
     except Exception: pass
-    id_map = None
+    df = None
     pq = art_dir / "id_map.parquet"
     if pq.exists():
-        try: id_map = pd.read_parquet(pq)
-        except Exception: id_map = None
-    if id_map is None:
-        id_map = pd.read_csv(art_dir / "id_map.csv")
+        try: df = pd.read_parquet(pq)
+        except Exception: df = None
+    if df is None:
+        df = pd.read_csv(art_dir / "id_map.csv")
     dim = int(meta["dim"])
     index = AnnoyIndex(dim, metric="angular"); index.load(str(art_dir / "annoy_index.ann"))
-    return meta, id_map, index
+    return meta, df, index
 
 meta, id_map_raw, index = load_artifacts(ART_DIR)
 
@@ -78,7 +102,7 @@ def dedup(df: pd.DataFrame, take: int | None = None) -> pd.DataFrame:
         df = df.drop_duplicates(subset=subs) if subs else df
     return df.head(take) if take else df
 
-# ---------- состояние ----------
+# =====================  STATE  =====================
 if "selected_row_id" not in st.session_state:
     st.session_state["selected_row_id"] = None
 if "q" not in st.session_state:
@@ -86,7 +110,7 @@ if "q" not in st.session_state:
 if "rand_cut_ids" not in st.session_state:
     st.session_state["rand_cut_ids"] = None
 
-# ---------- верхняя панель ----------
+# =====================  TOP BAR  =====================
 st.markdown('<div class="topbar">', unsafe_allow_html=True)
 c1, c2, c3 = st.columns([0.28, 0.54, 0.18])
 with c1:
@@ -104,23 +128,32 @@ with c3:
                 unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- helpers ----------
+# =====================  HELPERS  =====================
 def open_track(row_id: int):
     st.session_state["selected_row_id"] = int(row_id)
-    st.session_state["q"] = ""
+    st.session_state["q"] = ""   # свернуть прошлые результаты
     st.rerun()
 
 def render_card(row: pd.Series, row_id: int, key_prefix: str):
-    img = row.get(img_col) or "https://placehold.co/300x300?text=Track"
-    st.image(img, width=190)
-    st.markdown(f'<div class="card-title">{row.get(name_col,"Unknown")}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="card-artist">{row.get(artist_col,"")}</div>', unsafe_allow_html=True)
-    if pop_col and pd.notna(row.get(pop_col, None)):
-        st.markdown(f'<span class="pop-pill">pop {int(row[pop_col])}</span>', unsafe_allow_html=True)
-    st.markdown('<div class="open-btn">', unsafe_allow_html=True)
+    img = row.get(img_col) or "https://placehold.co/600x600?text=Track"
+    title = row.get(name_col, "Unknown")
+    artist = row.get(artist_col, "")
+    pop_txt = f'pop {int(row[pop_col])}' if pop_col and pd.notna(row.get(pop_col, None)) else ""
+
+    # фиксированная по высоте карточка -> кнопка окажется на одном уровне у всех
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="cover"><img src="{img}" alt="cover"/></div>
+          <div class="title">{title}</div>
+          <div class="artist">{artist}</div>
+          <div class="meta">{f'<span class="pop-pill">{pop_txt}</span>' if pop_txt else ''}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     if st.button("▶️ Open", key=f"{key_prefix}_open_{int(row_id)}"):
         open_track(int(row_id))
-    st.markdown('</div>', unsafe_allow_html=True)
 
 def render_grid(df: pd.DataFrame, key_prefix: str, take: int = 10, cols: int = 5):
     df = dedup(df, take=take)
@@ -169,7 +202,7 @@ def sample_random_cut_ids(k: int = 10) -> list[int]:
     k = min(k, len(pool_ids))
     return random.sample(pool_ids, k)
 
-# ---------- поиск ----------
+# =====================  SEARCH (всегда активен) =====================
 search_results = pd.DataFrame()
 if st.session_state["q"].strip():
     ql = st.session_state["q"].strip().lower()
@@ -185,7 +218,7 @@ if st.session_state["q"].strip():
         render_grid(search_results, key_prefix="search", take=20, cols=5)
     st.markdown("---")
 
-# ---------- основное ----------
+# =====================  MAIN / DETAILS  =====================
 selected_id = st.session_state["selected_row_id"]
 
 if pop_col:
@@ -221,6 +254,8 @@ else:
         else: render_grid(sim_df, key_prefix=f"sim_{selected_id}", take=10, cols=5)
 
 st.markdown("---")
+
+# =====================  RANDOM 10  =====================
 left, right = st.columns([0.9, 0.1])
 with left:
     st.subheader("⭐ Random 10")
